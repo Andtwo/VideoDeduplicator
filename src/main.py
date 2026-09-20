@@ -274,12 +274,14 @@ class VideoProcessor(QThread):
     def run(self):
         start_time = time.time()
         writer_process = None
+        writer_stderr = None
         width_a = height_a = 0
         duration_a = 0.0
         temp_b_path = os.path.join(self.temp_dir, "resized_b.mp4")
         temp_output_path = os.path.join(self.temp_dir, "temp_output.mp4")
+        writer_log_path = os.path.join(self.temp_dir, "ffmpeg_writer.log")
         path_b_to_process = self.video_b_path
-        temp_files_to_clean = [temp_output_path]
+        temp_files_to_clean = [temp_output_path, writer_log_path]
         reader_a_gen = None
         reader_b_gen = None
         try:
@@ -315,11 +317,13 @@ class VideoProcessor(QThread):
             writer_cmd.extend(quality_param.split())
             writer_cmd.extend(['-pix_fmt', 'yuv420p', temp_output_path])
             creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            # stderr 写入日志文件：避免长视频时 stderr 管道缓冲区写满导致互相死锁
+            writer_stderr = open(writer_log_path, "wb")
             writer_process = subprocess.Popen(
                 writer_cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                stderr=writer_stderr,
                 creationflags=creation_flags
             )
             self.status.emit(f"开始混合帧... (t={time.time() - start_time:.2f}s)")
@@ -352,9 +356,13 @@ class VideoProcessor(QThread):
                     reader_b_gen.close()
             self.status.emit(f"混合完成，正在生成最终视频文件... (t={time.time() - start_time:.2f}s)")
             writer_process.stdin.close()
-            _, stderr_output = writer_process.communicate()
+            writer_process.stdin = None  # 避免 wait/communicate 对已关闭 stdin 再次 flush
+            writer_process.wait()
+            writer_stderr.close()
             if writer_process.returncode != 0:
-                raise RuntimeError(f"FFmpeg写入视频失败: {stderr_output.decode('utf-8', errors='ignore')}")
+                with open(writer_log_path, "r", encoding="utf-8", errors="ignore") as f:
+                    log_tail = f.read()[-2000:]
+                raise RuntimeError(f"FFmpeg写入视频失败: {log_tail}")
             self.progress.emit(90)
             self.status.emit(f"合并音频... (t={time.time() - start_time:.2f}s)")
             final_cmd = [
@@ -381,6 +389,8 @@ class VideoProcessor(QThread):
             if writer_process and writer_process.poll() is None:
                 writer_process.kill()
                 writer_process.wait()
+            if writer_stderr and not writer_stderr.closed:
+                writer_stderr.close()
             for f in temp_files_to_clean:
                 if os.path.exists(f):
                     try:
