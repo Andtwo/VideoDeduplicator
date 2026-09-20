@@ -21,7 +21,8 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from media import get_video_info, resize_video, has_audio_stream
 from frame_io import frame_reader
 from config import ProcessingOptions
-from effects import EffectPipeline
+from effects import EffectPipeline, ProgressBarOverlay
+from branding import intro_frames, outro_frames
 from telemetry import events as telemetry_events
 
 
@@ -121,13 +122,25 @@ class VideoProcessor(QThread):
             # 确定本条视频的随机参数（任务内保持一致）
             randoms = self.options.sample_randoms(rng)
             speed = randoms["speed"]
-            effect_pipeline = EffectPipeline(self.options, rng, width_a, height_a)
+            content_duration = duration_a / speed
+            effect_pipeline = EffectPipeline(self.options, rng, width_a, height_a,
+                                              fps=self.fps,
+                                              content_duration=content_duration,
+                                              speed=speed)
             effect_pipeline.set_zoom(randoms["zoom"])
             self._report_params(effect_pipeline, speed, randoms["zoom"])
 
             total_frames_c = int(duration_a * self.fps)
             total_out_frames = int(round(total_frames_c / speed))
-            self.status.emit(f"目标视频C: {self.fps}fps, 总帧数: {total_frames_c} -> 输出 {total_out_frames} 帧 (时长 {total_out_frames / self.fps:.2f}s)")
+            intro_n = int(round(self.options.intro_duration * self.fps)) if self.options.intro_enabled else 0
+            outro_n = int(round(self.options.outro_duration * self.fps)) if self.options.outro_enabled else 0
+            progress_overlay = (ProgressBarOverlay(width_a, height_a)
+                                if self.options.progress_enabled else None)
+            total_final_frames = intro_n + total_out_frames + outro_n
+            total_final_duration = total_final_frames / self.fps
+            self.status.emit(f"目标视频C: {self.fps}fps, 总帧数: {total_frames_c} -> 输出 {total_out_frames} 帧"
+                             + (f" (含片头 {intro_n} + 片尾 {outro_n} 帧, 总时长 {total_final_duration:.2f}s)"
+                                if intro_n or outro_n else f" (时长 {total_out_frames / self.fps:.2f}s)"))
             self.status.emit(f"准备帧序列混合... (t={time.time() - start_time:.2f}s)")
             positions_a = get_a_positions(self.fps, total_frames_a)
             encoder = 'h264_nvenc' if self.use_gpu else 'libx264'
@@ -151,6 +164,14 @@ class VideoProcessor(QThread):
             )
             self.status.emit(f"开始混合帧... (t={time.time() - start_time:.2f}s)")
             self.progress.emit(20)
+            # 片头帧直接写入编码管道（与主视频同参数，无需 concat）
+            if intro_n:
+                self.status.emit(f"写入片头 {intro_n} 帧...")
+                for k, frame in enumerate(intro_frames(width_a, height_a, self.fps,
+                                                       self.options.intro_duration, self.options.intro_text, rng)):
+                    if progress_overlay is not None:
+                        frame = progress_overlay.apply(frame, k / max(1, total_final_frames - 1))
+                    writer_process.stdin.write(frame.tobytes())
             try:
                 reader_a_gen = frame_reader(self.video_a_path, width_a, height_a)
                 reader_b_gen = frame_reader(path_b_to_process, width_a, height_a)
@@ -158,6 +179,7 @@ class VideoProcessor(QThread):
                 a_frame_counter = 0
                 last_j = -1
                 written_frames = 0
+                global_j = float(intro_n)
                 for i in range(total_frames_c):
                     frame_to_write = None
                     try:
@@ -174,8 +196,12 @@ class VideoProcessor(QThread):
                             last_j = j
                         if not effect_pipeline.is_identity:
                             frame_to_write = effect_pipeline.apply(frame_to_write, written_frames)
+                        if progress_overlay is not None:
+                            progress = global_j / max(1, total_final_frames - 1)
+                            frame_to_write = progress_overlay.apply(frame_to_write, progress)
                         writer_process.stdin.write(frame_to_write.tobytes())
                         written_frames += 1
+                        global_j += 1
                         if (i + 1) % 50 == 0 or (i + 1) == total_frames_c:
                             progress = 20 + int(70 * (i + 1) / total_frames_c)
                             self.progress.emit(min(progress, 89))
@@ -188,6 +214,15 @@ class VideoProcessor(QThread):
                     reader_a_gen.close()
                 if reader_b_gen:
                     reader_b_gen.close()
+            # 片尾帧
+            if outro_n:
+                self.status.emit(f"写入片尾 {outro_n} 帧...")
+                outro_start = intro_n + written_frames
+                for k, frame in enumerate(outro_frames(width_a, height_a, self.fps,
+                                                       self.options.outro_duration, self.options.outro_text, rng)):
+                    if progress_overlay is not None:
+                        frame = progress_overlay.apply(frame, (outro_start + k) / max(1, total_final_frames - 1))
+                    writer_process.stdin.write(frame.tobytes())
             self.status.emit(f"混合完成，正在生成最终视频文件... (t={time.time() - start_time:.2f}s)")
             writer_process.stdin.close()
             writer_process.stdin = None  # 避免 wait/communicate 对已关闭 stdin 再次 flush
@@ -199,13 +234,14 @@ class VideoProcessor(QThread):
                 raise RuntimeError(f"FFmpeg写入视频失败: {log_tail}")
             self.progress.emit(90)
             self.status.emit(f"处理音轨... (t={time.time() - start_time:.2f}s)")
-            out_duration = written_frames / self.fps
-            self._compose_audio(temp_output_path, self.output_path, speed, out_duration,
-                                os.path.join(self.temp_dir, "ffmpeg_audio.log"))
+            final_duration = (intro_n + written_frames + outro_n) / self.fps
+            intro_ms = int(round(intro_n / self.fps * 1000))
+            self._compose_audio(temp_output_path, self.output_path, speed, final_duration,
+                                intro_ms, os.path.join(self.temp_dir, "ffmpeg_audio.log"))
             self.progress.emit(100)
             self.status.emit(f"视频处理完成! (总耗时: {time.time() - start_time:.2f}s)")
             self._track_task_success(time.time() - start_time, width_a, height_a,
-                                     duration_a / speed, written_frames / self.fps)
+                                     final_duration, final_duration)
             self.finished.emit()
         except Exception as e:
             import traceback
@@ -239,6 +275,16 @@ class VideoProcessor(QThread):
             parts.append(f"特效[{effect_pipeline.fx_style}] {self.options.fx_strength * 100:.0f}%")
         if self.options.sticker_enabled:
             parts.append("四角贴纸")
+        if self.options.caption_enabled:
+            parts.append("字幕条")
+        if self.options.fancy_enabled:
+            parts.append("花字")
+        if self.options.progress_enabled:
+            parts.append("进度条")
+        if self.options.intro_enabled:
+            parts.append(f"片头{self.options.intro_duration:.1f}s")
+        if self.options.outro_enabled:
+            parts.append(f"片尾{self.options.outro_duration:.1f}s")
         if self.options.audio_mode == "replace_bgm":
             parts.append("BGM替换")
         elif self.options.audio_mode == "mix_bgm":
@@ -250,90 +296,106 @@ class VideoProcessor(QThread):
         else:
             self.status.emit("后期处理未启用，仅帧混合。")
 
-    def _compose_audio(self, temp_output_path, output_path, speed, out_duration, audio_log_path):
-        """音轨合成：变速 atempo、BGM 替换/混音、配音替换，最后与视频流封装。"""
+    def _compose_audio(self, temp_output_path, output_path, speed, total_duration,
+                       intro_ms, audio_log_path):
+        """音轨合成：变速 atempo、BGM 替换/混音、配音替换，片头片尾静音对齐。
+
+        统一输出立体声 44100Hz AAC，时长对齐 total_duration。
+        """
         opts = self.options
         mode = opts.audio_mode
+        has_voice = has_audio_stream(self.video_a_path)
 
-        if mode == "original":
-            self._compose_original_audio(temp_output_path, output_path, speed, audio_log_path)
-            return
-
-        if not opts.audio_file or not os.path.exists(opts.audio_file):
-            raise ValueError(f"当前音频模式需要有效的音频文件: {opts.audio_file or '（未选择）'}")
+        # 原声处理链：统一立体声 + 变速 + 片头静音。
+        # 注意: ffmpeg 8.x 中 atempo+adelay 链式组合会产生损坏的输出，
+        # 片头静音改用 aevalsrc 静音源 + concat 滤镜实现
+        def voice_chain():
+            parts = ["aformat=channel_layouts=stereo", "aresample=44100"]
+            if speed > 1.001:
+                parts.append(f"atempo={speed:.4f}")
+            if intro_ms > 0:
+                intro_sec = intro_ms / 1000.0
+                voice = "[0:a]" + ",".join(parts) + "[v]"
+                # 静音前缀 + 尾部 apad（靠 -t 截断对齐总时长）
+                return (f"aevalsrc=0|0:d={intro_sec:.3f}:s=44100[sl];"
+                        f"{voice};[sl][v]concat=n=2:v=0:a=1,apad[a0]"), "[a0]"
+            return "[0:a]" + ",".join(parts + ["apad"]) + "[v]", "[v]"
 
         temp_audio = os.path.join(self.temp_dir, "temp_audio.m4a")
-        has_voice = has_audio_stream(self.video_a_path)
+
+        if mode == "original" and not has_voice:
+            # 无原声：纯视频输出（片头片尾自然无声）
+            self.status.emit("视频A无音轨，输出纯视频。")
+            run_ffmpeg(['ffmpeg', '-y', '-i', temp_output_path, '-c', 'copy', output_path],
+                       audio_log_path)
+            return
+
         if mode == "replace_voice":
-            # 配音替换：外部音频作为唯一音轨，音量不衰减，循环/截断对齐时长
+            if not opts.audio_file or not os.path.exists(opts.audio_file):
+                raise ValueError(f"配音模式需要有效的音频文件: {opts.audio_file or '（未选择）'}")
             self.status.emit(f"使用配音替换原声: {os.path.basename(opts.audio_file)}")
+            if intro_ms > 0:
+                intro_sec = intro_ms / 1000.0
+                graph = (f"aevalsrc=0|0:d={intro_sec:.3f}:s=44100[sl];"
+                         f"[0:a]aformat=channel_layouts=stereo,aresample=44100[v];"
+                         f"[sl][v]concat=n=2:v=0:a=1,apad[a]")
+                out_label = "[a]"
+            else:
+                graph = "[0:a]aformat=channel_layouts=stereo,aresample=44100,apad[a]"
+                out_label = "[a]"
             run_ffmpeg([
-                'ffmpeg', '-y', '-stream_loop', '-1', '-i', opts.audio_file,
-                '-filter_complex', '[0:a]volume=1.0[a]', '-map', '[a]',
-                '-t', f'{out_duration:.3f}',
-                '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', temp_audio
+                'ffmpeg', '-y', '-i', opts.audio_file,
+                '-filter_complex', graph,
+                '-map', out_label, '-t', f'{total_duration:.3f}',
+                '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', temp_audio
             ], audio_log_path)
-        elif mode == "replace_bgm" or not has_voice:
+        elif mode == "replace_bgm" or (mode == "mix_bgm" and not has_voice):
+            if not opts.audio_file or not os.path.exists(opts.audio_file):
+                raise ValueError(f"当前音频模式需要有效的音频文件: {opts.audio_file or '（未选择）'}")
             if mode == "mix_bgm" and not has_voice:
                 self.status.emit("视频A无音轨，混音模式降级为 BGM 替换。")
             else:
                 self.status.emit(f"使用 BGM 替换原声: {os.path.basename(opts.audio_file)}")
             run_ffmpeg([
                 'ffmpeg', '-y', '-stream_loop', '-1', '-i', opts.audio_file,
-                '-filter_complex', f'[0:a]volume={opts.bgm_volume:.2f}[a]', '-map', '[a]',
-                '-t', f'{out_duration:.3f}',
-                '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', temp_audio
+                '-filter_complex', f"[0:a]aformat=channel_layouts=stereo,aresample=44100,volume={opts.bgm_volume:.2f}[a]",
+                '-map', '[a]', '-t', f'{total_duration:.3f}',
+                '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', temp_audio
             ], audio_log_path)
-        else:
-            # mix_bgm：原声（变速后）+ BGM 混音
+        elif mode == "mix_bgm":
+            if not opts.audio_file or not os.path.exists(opts.audio_file):
+                raise ValueError(f"当前音频模式需要有效的音频文件: {opts.audio_file or '（未选择）'}")
             self.status.emit(f"原声与 BGM 混音（BGM 音量 {opts.bgm_volume:.0%}）: {os.path.basename(opts.audio_file)}")
-            voice_chain = f'[0:a]atempo={speed:.4f}[a0]' if speed > 1.001 else '[0:a]anull[a0]'
+            voice_graph, voice_label = voice_chain()
             run_ffmpeg([
                 'ffmpeg', '-y', '-i', self.video_a_path, '-stream_loop', '-1', '-i', opts.audio_file,
                 '-filter_complex',
-                f'{voice_chain};[1:a]volume={opts.bgm_volume:.2f}[a1];'
-                f'[a0][a1]amix=inputs=2:duration=first:normalize=0[aout]',
-                '-map', '[aout]', '-t', f'{out_duration:.3f}',
-                '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', temp_audio
+                voice_graph + f";[1:a]aformat=channel_layouts=stereo,aresample=44100,volume={opts.bgm_volume:.2f}[a1];"
+                f"{voice_label}[a1]amix=inputs=2:duration=longest:normalize=0[aout]",
+                '-map', '[aout]', '-t', f'{total_duration:.3f}',
+                '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', temp_audio
+            ], audio_log_path)
+        else:
+            # original：保留原声（变速 + 片头静音 + 尾部补齐）
+            voice_graph, voice_label = voice_chain()
+            run_ffmpeg([
+                'ffmpeg', '-y', '-i', self.video_a_path,
+                '-filter_complex', voice_graph,
+                '-map', voice_label, '-t', f'{total_duration:.3f}',
+                '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', temp_audio
             ], audio_log_path)
 
+        # 不用 -shortest：amix 产出的音轨时长元数据可能为 N/A，
+        # ffmpeg 7 下 copy 模式 -shortest 会直接产出空文件；改用 -t 对齐两流
         run_ffmpeg([
             'ffmpeg', '-y', '-i', temp_output_path, '-i', temp_audio,
-            '-map', '0:v', '-map', '1:a', '-c', 'copy', '-shortest', output_path
+            '-map', '0:v', '-map', '1:a', '-c', 'copy',
+            '-t', f'{total_duration:.3f}', output_path
         ], audio_log_path)
         try:
             os.remove(temp_audio)
         except OSError:
             pass
-
-    def _compose_original_audio(self, temp_output_path, output_path, speed, audio_log_path):
-        """保留原声模式：变速时 atempo 处理原声，无音轨则纯视频输出。"""
-        audio_available = has_audio_stream(self.video_a_path)
-        if audio_available and speed > 1.001:
-            temp_audio = os.path.join(self.temp_dir, "temp_audio.m4a")
-            run_ffmpeg([
-                'ffmpeg', '-y', '-i', self.video_a_path,
-                '-filter_complex', f'atempo={speed:.4f}',
-                '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', temp_audio
-            ], audio_log_path)
-            run_ffmpeg([
-                'ffmpeg', '-y', '-i', temp_output_path, '-i', temp_audio,
-                '-map', '0:v', '-map', '1:a', '-c', 'copy', '-shortest', output_path
-            ], audio_log_path)
-            try:
-                os.remove(temp_audio)
-            except OSError:
-                pass
-        elif audio_available:
-            run_ffmpeg([
-                'ffmpeg', '-y', '-i', temp_output_path, '-i', self.video_a_path,
-                '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-shortest', output_path
-            ], audio_log_path)
-        else:
-            self.status.emit("视频A无音轨，输出纯视频。")
-            run_ffmpeg([
-                'ffmpeg', '-y', '-i', temp_output_path, '-c', 'copy', output_path
-            ], audio_log_path)
 
     def _track_task_success(self, elapsed, width_a, height_a, duration_a, out_duration):
         if not self.telemetry:

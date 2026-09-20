@@ -1,5 +1,6 @@
 """处理选项配置模型：所有后期功能参数集中定义。"""
 
+import os
 from dataclasses import dataclass, field
 
 
@@ -45,6 +46,20 @@ class ProcessingOptions:
     audio_file: str = ""      # BGM 或配音文件路径
     bgm_volume: float = 0.3   # BGM 音量（替换与混音模式生效）
 
+    # ④ 包装：字幕条 / 花字 / 进度条 / 片头片尾
+    caption_enabled: bool = False
+    caption_text: str = ""       # 多行文本，每行一条均分时长
+    caption_srt: str = ""        # SRT 文件路径（优先于多行文本）
+    fancy_enabled: bool = False
+    fancy_text: str = ""         # 花字内容
+    progress_enabled: bool = False
+    intro_enabled: bool = False
+    intro_text: str = ""
+    intro_duration: float = 1.5  # 秒
+    outro_enabled: bool = False
+    outro_text: str = ""
+    outro_duration: float = 1.0  # 秒
+
     def sample_randoms(self, rng):
         """任务开始时确定本条视频的随机参数，返回 dict。同一次任务内保持一致。"""
         speed = rng.uniform(self.speed_min, self.speed_max) if self.speed_enabled else 1.0
@@ -72,4 +87,31 @@ class ProcessingOptions:
             names.append("sticker")
         if self.audio_mode != "original":
             names.append(self.audio_mode)
+        if self.caption_enabled:
+            names.append("caption")
+        if self.fancy_enabled:
+            names.append("fancy")
+        if self.progress_enabled:
+            names.append("progress")
+        if self.intro_enabled:
+            names.append("intro")
+        if self.outro_enabled:
+            names.append("outro")
         return names
+
+    def caption_entries(self, content_duration, speed=1.0):
+        """返回字幕条目 [(start, end, text), ...]，时间轴为内容段输出时间。
+
+        SRT 时间轴基于原视频，需除以 speed 换算；多行文本均分时长。
+        """
+        if self.caption_srt and os.path.exists(self.caption_srt):
+            from assets import parse_srt
+            entries = parse_srt(self.caption_srt)
+            if speed > 1.001:
+                entries = [(s / speed, e / speed, t) for s, e, t in entries]
+            return entries
+        lines = [line.strip() for line in self.caption_text.splitlines() if line.strip()]
+        if not lines:
+            return []
+        seg = content_duration / len(lines)
+        return [(i * seg, (i + 1) * seg, text) for i, text in enumerate(lines)]

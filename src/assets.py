@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 import math
 
 from PIL import Image, ImageDraw, ImageFont
@@ -128,6 +129,33 @@ def _draw_sticker(kind, size):
                   fill=(255, 255, 255, 250))
 
     return img
+
+
+def parse_srt(path):
+    """解析 SRT 字幕文件，返回 [(start_sec, end_sec, text), ...]。"""
+    entries = []
+    with open(path, "r", encoding="utf-8-sig", errors="ignore") as f:
+        content = f.read()
+    blocks = [b.strip() for b in content.replace("\r\n", "\n").split("\n\n") if b.strip()]
+    for block in blocks:
+        lines = block.split("\n")
+        if len(lines) < 2:
+            continue
+        # 跳过序号行，定位时间行
+        time_line = next((l for l in lines if "-->" in l), None)
+        if not time_line:
+            continue
+        text = "\n".join(lines[lines.index(time_line) + 1:]).strip()
+        if not text:
+            continue
+        m = re.match(r"\s*(\d+):(\d+):(\d+)[,.](\d+)\s*-->\s*(\d+):(\d+):(\d+)[,.](\d+)", time_line)
+        if not m:
+            continue
+        g = list(map(int, m.groups()))
+        start = g[0] * 3600 + g[1] * 60 + g[2] + g[3] / 1000.0
+        end = g[4] * 3600 + g[5] * 60 + g[6] + g[7] / 1000.0
+        entries.append((start, end, text))
+    return entries
 
 
 def get_sticker(kind, size):

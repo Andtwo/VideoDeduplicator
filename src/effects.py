@@ -6,10 +6,11 @@
 
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw
 from PIL import Image as _PILImage
 
 from config import FILTER_STYLES, FX_STYLES
-from assets import STICKER_KINDS, get_sticker
+from assets import STICKER_KINDS, get_sticker, load_font
 
 Image_FLIP = _PILImage.FLIP_LEFT_RIGHT
 Image_BICUBIC = _PILImage.BICUBIC
@@ -228,13 +229,172 @@ class StickerOverlay:
         return np.clip(out, 0, 255).astype(np.uint8)
 
 
+class CaptionBar:
+    """字幕条：底部半透明条 + 白色文本，按内容段时间轴切换。"""
+
+    def __init__(self, entries, width, height, fps):
+        self.entries = entries
+        self.fps = fps
+        bar_h = max(int(height * 0.13), 40)
+        self.bar_y = height - bar_h - max(4, height // 120)
+        self.bar_h = bar_h
+        # 半透明黑色条（预生成 float 层）
+        self.bar_rgb = np.zeros((bar_h, width, 3), dtype=np.float32)
+        self.bar_alpha = np.full((bar_h, width, 1), 0.55, dtype=np.float32)
+        # 预渲染各条目文本层
+        font_size = max(16, int(height * 0.042))
+        font = load_font(font_size)
+        max_width = int(width * 0.86)
+        self.text_layers = []
+        for _, _, text in entries:
+            layer = self._render_text(text, font, font_size, width, bar_h, max_width)
+            self.text_layers.append(layer)
+
+    def _render_text(self, text, font, font_size, width, bar_h, max_width):
+        """渲染居中多行文本，返回 (y偏移, rgb, alpha)。"""
+        img = Image.new("RGBA", (width, bar_h), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        lines = []
+        for raw in text.split("\n"):
+            lines.extend(self._wrap(raw, font, max_width))
+        if len(lines) > 3:  # 最多三行，超出截断
+            lines = lines[:3]
+        line_h = int(font_size * 1.35)
+        total_h = line_h * len(lines)
+        y = max(0, (bar_h - total_h) // 2)
+        for line in lines:
+            bbox = d.textbbox((0, 0), line, font=font)
+            x = (width - (bbox[2] - bbox[0])) // 2
+            d.text((x, y), line, font=font, fill=(255, 255, 255, 255),
+                   stroke_width=max(1, font_size // 24), stroke_fill=(0, 0, 0, 200))
+            y += line_h
+        arr = np.asarray(img, dtype=np.float32)
+        return arr[..., :3][..., ::-1], arr[..., 3:4] / 255.0
+
+    @staticmethod
+    def _wrap(text, font, max_width):
+        """按像素宽度逐字换行（兼容中文）。"""
+        if not text:
+            return [""]
+        lines, cur = [], ""
+        for ch in text:
+            if font.getlength(cur + ch) > max_width and cur:
+                lines.append(cur)
+                cur = ch
+            else:
+                cur += ch
+        lines.append(cur)
+        return lines
+
+    def apply(self, frame, content_index):
+        t = content_index / self.fps
+        # 线性扫描（条目数通常很少）
+        for idx, (start, end, _) in enumerate(self.entries):
+            if start <= t < end:
+                text_rgb, text_a = self.text_layers[idx]
+                bar = frame.astype(np.float32)
+                bar[self.bar_y:self.bar_y + self.bar_h] = (
+                    bar[self.bar_y:self.bar_y + self.bar_h] * (1.0 - self.bar_alpha)
+                    + self.bar_rgb * self.bar_alpha)
+                th, _ = text_rgb.shape[:2]
+                y0 = self.bar_y + (self.bar_h - th) // 2
+                region = bar[y0:y0 + th]
+                bar[y0:y0 + th] = region * (1.0 - text_a) + text_rgb * text_a
+                return np.clip(bar, 0, 255).astype(np.uint8)
+        return frame
+
+
+class FancyText:
+    """花字：画面上部大字，渐变填充 + 白描边 + 阴影，任务内静态。"""
+
+    def __init__(self, text, rng, width, height):
+        font_size = max(24, int(height * 0.075))
+        font = load_font(font_size)
+        # 渐变色（从随机色相中选一组高饱和渐变）
+        hue = rng.uniform(0, 360)
+        c1 = self._hsv_to_bgr(hue, 0.85, 1.0)
+        c2 = self._hsv_to_bgr((hue + 60) % 360, 0.9, 1.0)
+        pad = font_size // 3
+        # 临时画布测文本尺寸
+        probe = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
+        bbox = probe.textbbox((0, 0), text, font=font,
+                              stroke_width=max(2, font_size // 16))
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        layer = Image.new("RGBA", (tw + pad * 4, th + pad * 4), (0, 0, 0, 0))
+        d = ImageDraw.Draw(layer)
+        # 阴影
+        d.text((pad * 2 + font_size // 12, pad * 2 + font_size // 10), text,
+               font=font, fill=(0, 0, 0, 160), stroke_width=max(2, font_size // 16),
+               stroke_fill=(0, 0, 0, 160))
+        # 主文本：先白描边，再渐变填充
+        d.text((pad * 2, pad * 2), text, font=font, fill=(255, 255, 255, 255),
+               stroke_width=max(2, font_size // 16), stroke_fill=(255, 255, 255, 255))
+        mask = Image.new("L", layer.size, 0)
+        ImageDraw.Draw(mask).text((pad * 2, pad * 2), text, font=font, fill=255)
+        gradient = self._gradient_image(layer.size, c1, c2)
+        layer.paste(gradient, (0, 0), mask)
+        # 随机水平位置（上部 8%~16% 区域）
+        lw, lh = layer.size
+        x0 = int(rng.integers(0, max(1, width - lw))) if lw < width else 0
+        y0 = int(height * rng.uniform(0.06, 0.12))
+        self.layer_rgb = np.zeros((height, width, 3), dtype=np.float32)
+        self.layer_a = np.zeros((height, width, 1), dtype=np.float32)
+        x1, y1 = min(x0 + lw, width), min(y0 + lh, height)
+        arr = np.asarray(layer, dtype=np.float32)[:y1 - y0, :x1 - x0]
+        self.layer_rgb[y0:y1, x0:x1] = arr[..., :3][..., ::-1]
+        self.layer_a[y0:y1, x0:x1] = arr[..., 3:4] / 255.0
+
+    @staticmethod
+    def _hsv_to_bgr(h, s, v):
+        import colorsys
+        r, g, b = colorsys.hsv_to_rgb(h / 360.0, s, v)
+        return int(b * 255), int(g * 255), int(r * 255)
+
+    @staticmethod
+    def _gradient_image(size, c1, c2):
+        w, h = size
+        base = Image.new("RGB", (w, h))
+        px = base.load()
+        for x in range(w):
+            t = x / max(1, w - 1)
+            color = tuple(int(a + (b - a) * t) for a, b in zip(c1, c2))
+            for y in range(0, h, 4):  # 步进加速，逐列填充
+                for yy in range(y, min(y + 4, h)):
+                    px[x, yy] = color
+        return base
+
+    def apply(self, frame, content_index):
+        out = frame.astype(np.float32) * (1.0 - self.layer_a) + self.layer_rgb * self.layer_a
+        return np.clip(out, 0, 255).astype(np.uint8)
+
+
+class ProgressBarOverlay:
+    """进度条：画面最底部细条，按全局输出时间推进。"""
+
+    def __init__(self, width, height, color=(226, 144, 74)):  # BGR 主题蓝
+        self.width = width
+        self.bar_h = max(4, height // 210)
+        self.track_y = height - self.bar_h - max(3, height // 300)
+        self.color = np.array(color, dtype=np.float32)
+
+    def apply(self, frame, progress):
+        out = frame.copy()
+        y0, y1 = self.track_y, self.track_y + self.bar_h
+        track = out[y0:y1].astype(np.float32) * 0.55  # 半透明轨道
+        out[y0:y1] = track.astype(np.uint8)
+        fill_w = int(self.width * min(max(progress, 0.0), 1.0))
+        if fill_w > 0:
+            out[y0:y1, :fill_w] = self.color.astype(np.uint8)
+        return out
+
+
 class EffectPipeline:
     """按配置组装效果并逐帧应用。apply 针对主内容段的输出帧（变速筛选后）。
 
     顺序：ZoomCrop（几何）-> Mirror -> ColorFilter -> 特效 -> 贴纸。
     """
 
-    def __init__(self, options, rng, width, height):
+    def __init__(self, options, rng, width, height, fps=60, content_duration=None, speed=1.0):
         self.fx_style = None
         self.filter_style = None
         self.zoom = None
@@ -253,6 +413,12 @@ class EffectPipeline:
             self.effects.append(fx_cls[style](options.fx_strength, rng, (height, width)))
         if options.sticker_enabled:
             self.effects.append(StickerOverlay(rng, width, height))
+        if options.caption_enabled and content_duration:
+            entries = options.caption_entries(content_duration, speed)
+            if entries:
+                self.effects.append(CaptionBar(entries, width, height, fps))
+        if options.fancy_enabled and options.fancy_text.strip():
+            self.effects.append(FancyText(options.fancy_text.strip(), rng, width, height))
 
     def set_zoom(self, zoom_scale):
         """设置画面放大比例（由 options.sample_randoms 采样后传入）。"""

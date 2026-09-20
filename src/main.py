@@ -6,7 +6,7 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QFileDialog, QLabel,
                              QRadioButton, QVBoxLayout, QWidget, QProgressBar, QHBoxLayout,
                              QTextEdit, QFrame, QButtonGroup, QCheckBox, QScrollArea,
-                             QComboBox, QDoubleSpinBox, QSizePolicy)
+                             QComboBox, QDoubleSpinBox, QSizePolicy, QTabWidget, QLineEdit)
 try:
     import resources
 except ImportError:
@@ -162,6 +162,25 @@ QScrollArea {
     border: none;
     background: transparent;
 }
+QTabWidget::pane {
+    border: 1px solid #444;
+    border-radius: 4px;
+    background: rgba(35, 35, 50, 0.6);
+}
+QTabBar::tab {
+    background: #2a2a3a;
+    color: #b0b0c0;
+    padding: 6px 14px;
+    margin-right: 2px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    font-size: 13px;
+}
+QTabBar::tab:selected {
+    background: #3d3d55;
+    color: #fff;
+    border-bottom: 2px solid #4a90e2;
+}
 QLineEdit, QTextEdit#caption_edit {
     background: rgba(60, 60, 80, 0.9);
     color: #e0e0e0;
@@ -185,7 +204,7 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(":/logo.png"))
         except:
             print("图标资源 :logo.png 未找到，请检查resources.qrc和resources.py文件。")
-        self.setGeometry(100, 100, 600, 850)
+        self.setGeometry(100, 100, 600, 950)
         self.init_ui()
         sys.excepthook = self.except_hook
         self.telemetry_config = TelemetryConfig()
@@ -309,19 +328,31 @@ class MainWindow(QMainWindow):
         self.video_b_path = ""
         self.output_path = ""
         self.audio_file_path = ""
+        self.caption_srt_path = ""
         self.temp_dir = os.path.join(os.path.expanduser("~"), ".video_temp_optimized")
         if not os.path.exists(self.temp_dir):
             os.makedirs(self.temp_dir)
 
     def _build_post_section(self):
-        """构建后期处理配置面板（可滚动）。"""
+        """构建后期处理配置面板：两个标签页（画面与音频 / 包装）。"""
         frame = QFrame()
         layout = QVBoxLayout(frame)
         layout.setSpacing(8)
         title = QLabel("后期处理")
         title.setObjectName("section_title")
         layout.addWidget(title)
+        tabs = QTabWidget()
+        tabs.addTab(self._build_visual_tab(), "画面与音频")
+        tabs.addTab(self._build_branding_tab(), "包装")
+        layout.addWidget(tabs)
+        frame.setLayout(layout)
+        return frame
 
+    def _build_visual_tab(self):
+        """画面效果与音频配置页。"""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
         rows = QWidget()
         rows_layout = QVBoxLayout(rows)
         rows_layout.setSpacing(10)
@@ -411,13 +442,83 @@ class MainWindow(QMainWindow):
         rows_layout.addWidget(holder)
 
         rows.setLayout(rows_layout)
-        scroll = QScrollArea()
         scroll.setWidget(rows)
+        scroll.setFixedHeight(260)
+        return scroll
+
+    def _build_branding_tab(self):
+        """包装配置页：字幕条 / 花字 / 进度条 / 片头片尾。"""
+        scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFixedHeight(240)
-        layout.addWidget(scroll)
-        frame.setLayout(layout)
-        return frame
+        scroll.setFrameShape(QFrame.NoFrame)
+        rows = QWidget()
+        rows_layout = QVBoxLayout(rows)
+        rows_layout.setSpacing(10)
+        rows_layout.setContentsMargins(4, 4, 4, 4)
+
+        # 字幕条
+        self.caption_check, caption_row = self._row_start("④ 字幕条")
+        self.btn_caption_srt = QPushButton("SRT")
+        self.btn_caption_srt.setObjectName("select_button")
+        self.btn_caption_srt.clicked.connect(self.select_caption_srt)
+        self.label_caption_srt = QLabel("多行文本模式")
+        self.label_caption_srt.setObjectName("path_label")
+        caption_row.addWidget(self.btn_caption_srt)
+        caption_row.addWidget(self.label_caption_srt, 1)
+        self._row_end(rows_layout, caption_row)
+        self.caption_edit = QTextEdit()
+        self.caption_edit.setObjectName("caption_edit")
+        self.caption_edit.setPlaceholderText("字幕文本，每行一条，均分内容时长")
+        self.caption_edit.setFixedHeight(52)
+        rows_layout.addWidget(self.caption_edit)
+
+        # 花字
+        self.fancy_check, fancy_row = self._row_start("④ 花字")
+        self.fancy_edit = QLineEdit()
+        self.fancy_edit.setPlaceholderText("花字内容，显示在画面上部")
+        fancy_row.addWidget(self.fancy_edit, 1)
+        self._row_end(rows_layout, fancy_row)
+
+        # 进度条
+        self.progress_check, progress_row = self._row_start("④ 进度条（底部）")
+        self._row_end(rows_layout, progress_row)
+
+        # 片头
+        self.intro_check, intro_row = self._row_start("④ 片头")
+        self.intro_edit = QLineEdit()
+        self.intro_edit.setPlaceholderText("片头标题（留空则纯背景）")
+        self.intro_edit.setFixedWidth(220)
+        self.intro_dur_spin = self._spin(1.5, 0.5, 3.0, 0.1, "秒")
+        intro_row.addWidget(self.intro_edit, 1)
+        intro_row.addWidget(QLabel("时长"))
+        intro_row.addWidget(self.intro_dur_spin)
+        self._row_end(rows_layout, intro_row)
+
+        # 片尾
+        self.outro_check, outro_row = self._row_start("④ 片尾")
+        self.outro_edit = QLineEdit()
+        self.outro_edit.setPlaceholderText("片尾标题（留空则纯背景）")
+        self.outro_edit.setFixedWidth(220)
+        self.outro_dur_spin = self._spin(1.0, 0.5, 3.0, 0.1, "秒")
+        outro_row.addWidget(self.outro_edit, 1)
+        outro_row.addWidget(QLabel("时长"))
+        outro_row.addWidget(self.outro_dur_spin)
+        self._row_end(rows_layout, outro_row)
+
+        rows.setLayout(rows_layout)
+        scroll.setWidget(rows)
+        scroll.setFixedHeight(260)
+        return scroll
+
+    def select_caption_srt(self):
+        path, _ = QFileDialog.getOpenFileName(self, "选择 SRT 字幕文件", "", "字幕文件 (*.srt)")
+        if path:
+            self.caption_srt_path = path
+            self.label_caption_srt.setText(os.path.basename(path))
+            self.label_caption_srt.setToolTip(path)
+        else:
+            self.caption_srt_path = ""
+            self.label_caption_srt.setText("多行文本模式")
 
     def _row_start(self, text):
         check = QCheckBox(text)
@@ -481,6 +582,18 @@ class MainWindow(QMainWindow):
                         if self.audio_check.isChecked() else "original"),
             audio_file=getattr(self, "audio_file_path", ""),
             bgm_volume=self.audio_volume_spin.value() / 100.0,
+            caption_enabled=self.caption_check.isChecked(),
+            caption_text=self.caption_edit.toPlainText(),
+            caption_srt=getattr(self, "caption_srt_path", ""),
+            fancy_enabled=self.fancy_check.isChecked(),
+            fancy_text=self.fancy_edit.text(),
+            progress_enabled=self.progress_check.isChecked(),
+            intro_enabled=self.intro_check.isChecked(),
+            intro_text=self.intro_edit.text(),
+            intro_duration=self.intro_dur_spin.value(),
+            outro_enabled=self.outro_check.isChecked(),
+            outro_text=self.outro_edit.text(),
+            outro_duration=self.outro_dur_spin.value(),
         )
 
     def select_video_a(self):
@@ -594,7 +707,10 @@ class MainWindow(QMainWindow):
                   self.zoom_check, self.zoom_random_check, self.zoom_min_spin, self.zoom_max_spin,
                   self.mirror_check, self.filter_check, self.filter_style_combo, self.filter_strength_spin,
                   self.fx_check, self.fx_style_combo, self.fx_strength_spin, self.sticker_check,
-                  self.audio_check, self.audio_mode_combo, self.btn_audio_file, self.audio_volume_spin):
+                  self.audio_check, self.caption_check, self.fancy_check, self.progress_check,
+                  self.intro_check, self.outro_check, self.caption_edit, self.fancy_edit,
+                  self.intro_edit, self.outro_edit, self.intro_dur_spin, self.outro_dur_spin,
+                  self.btn_caption_srt):
             if w is self.audio_mode_combo or w is self.btn_audio_file or w is self.audio_volume_spin:
                 w.setEnabled(enabled and self.audio_check.isChecked())
             else:
