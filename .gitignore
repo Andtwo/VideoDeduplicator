@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+venv/
+telemetry-server/data/

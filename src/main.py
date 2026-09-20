@@ -1,13 +1,14 @@
 import os
 import sys
 import cv2
+import uuid
 import time
 import ffmpeg
 import itertools
 import subprocess
 import numpy as np
 from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QFileDialog, QLabel,
                              QRadioButton, QVBoxLayout, QWidget, QProgressBar, QHBoxLayout,
                              QTextEdit, QFrame, QButtonGroup, QCheckBox)
@@ -16,6 +17,10 @@ try:
 except ImportError:
     print("警告: 资源文件 'resources.py' 未找到。图标可能无法显示。")
     print("请使用 'pyrcc5 resources.qrc -o resources.py' 生成它。")
+
+from telemetry import TelemetryClient, TelemetryConfig
+from telemetry import consent as telemetry_consent
+from telemetry import events as telemetry_events
 
 qss = """
 QWidget {
@@ -254,7 +259,8 @@ class VideoProcessor(QThread):
     finished = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, video_a_path, video_b_path, output_path, fps, temp_dir, use_gpu=False):
+    def __init__(self, video_a_path, video_b_path, output_path, fps, temp_dir, use_gpu=False,
+                 telemetry=None, task_id=None):
         super().__init__()
         self.video_a_path = video_a_path
         self.video_b_path = video_b_path
@@ -262,10 +268,14 @@ class VideoProcessor(QThread):
         self.fps = fps
         self.temp_dir = temp_dir
         self.use_gpu = use_gpu
+        self.telemetry = telemetry
+        self.task_id = task_id
 
     def run(self):
         start_time = time.time()
         writer_process = None
+        width_a = height_a = 0
+        duration_a = 0.0
         temp_b_path = os.path.join(self.temp_dir, "resized_b.mp4")
         temp_output_path = os.path.join(self.temp_dir, "temp_output.mp4")
         path_b_to_process = self.video_b_path
@@ -361,9 +371,11 @@ class VideoProcessor(QThread):
             )
             self.progress.emit(100)
             self.status.emit(f"视频处理完成! (总耗时: {time.time() - start_time:.2f}s)")
+            self._track_task_success(time.time() - start_time, width_a, height_a, duration_a)
             self.finished.emit()
         except Exception as e:
             import traceback
+            self._track_task_failed(e)
             self.error.emit(f"错误：{str(e)}\n{traceback.format_exc()}")
         finally:
             if writer_process and writer_process.poll() is None:
@@ -376,6 +388,30 @@ class VideoProcessor(QThread):
                     except OSError as e:
                         self.status.emit(f"无法删除临时文件 {f}: {e}")
 
+    def _track_task_success(self, elapsed, width_a, height_a, duration_a):
+        if not self.telemetry:
+            return
+        self.telemetry.track(telemetry_events.EVENT_TASK_SUCCESS, {
+            "task_id": self.task_id,
+            "fps": self.fps,
+            "use_gpu": self.use_gpu,
+            "resolution_bucket": telemetry_events.resolution_bucket(width_a, height_a),
+            "duration_bucket": telemetry_events.duration_bucket(duration_a),
+            "processing_seconds_bucket": telemetry_events.processing_seconds_bucket(elapsed),
+        })
+
+    def _track_task_failed(self, exc):
+        if not self.telemetry:
+            return
+        error_type, error_stage = telemetry_events.classify_error(exc, self.use_gpu)
+        self.telemetry.track(telemetry_events.EVENT_TASK_FAILED, {
+            "task_id": self.task_id,
+            "fps": self.fps,
+            "use_gpu": self.use_gpu,
+            "error_type": error_type,
+            "error_stage": error_stage,
+        })
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -387,6 +423,12 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 600, 850)
         self.init_ui()
         sys.excepthook = self.except_hook
+        self.telemetry_config = TelemetryConfig()
+        self.telemetry = TelemetryClient(self.telemetry_config)
+        self._telemetry_ui_ready = False
+        self.telemetry_checkbox.setChecked(self.telemetry_config.enabled)
+        self._telemetry_ui_ready = True
+        QTimer.singleShot(0, self._init_telemetry_consent)
 
     def init_ui(self):
         container = QWidget()
@@ -468,6 +510,13 @@ class MainWindow(QMainWindow):
         self.gpu_checkbox = QCheckBox("启用GPU加速（需要NVIDIA显卡和驱动）")
         self.gpu_checkbox.setChecked(False)
         options_layout.addWidget(self.gpu_checkbox)
+        telemetry_title = QLabel("隐私与统计")
+        telemetry_title.setObjectName("section_title")
+        options_layout.addWidget(telemetry_title)
+        self.telemetry_checkbox = QCheckBox("启用匿名使用统计（不收集视频内容与文件路径）")
+        self.telemetry_checkbox.setChecked(False)
+        self.telemetry_checkbox.toggled.connect(self.on_telemetry_toggled)
+        options_layout.addWidget(self.telemetry_checkbox)
         options_frame.setLayout(options_layout)
         main_layout.addWidget(options_frame)
         self.btn_run = QPushButton("运行")
@@ -523,6 +572,37 @@ class MainWindow(QMainWindow):
         else:
             self.btn_run.setEnabled(False)
 
+    def _init_telemetry_consent(self):
+        """首次启动弹出统计说明，用户选择前不上报任何事件。"""
+        try:
+            if not self.telemetry_config.prompt_shown:
+                accepted = telemetry_consent.ask_consent(self)
+                self.telemetry_config.mark_prompt_shown()
+                self.telemetry_config.set_enabled(accepted)
+                self._telemetry_ui_ready = False
+                self.telemetry_checkbox.setChecked(accepted)
+                self._telemetry_ui_ready = True
+            if self.telemetry_config.enabled:
+                if not self.telemetry_config.first_open_reported:
+                    self.telemetry.track(telemetry_events.EVENT_APP_FIRST_OPEN)
+                    self.telemetry_config.mark_first_open_reported()
+                self.telemetry.track(telemetry_events.EVENT_APP_OPEN)
+        except Exception:
+            pass
+
+    def on_telemetry_toggled(self, checked):
+        if not getattr(self, "_telemetry_ui_ready", False):
+            return
+        try:
+            if checked:
+                self.telemetry.set_enabled(True)
+            else:
+                # 关闭前上报最后一次（仅版本/平台信息），随后停止一切上报
+                self.telemetry.track(telemetry_events.EVENT_TELEMETRY_DISABLED)
+                self.telemetry.set_enabled(False)
+        except Exception:
+            pass
+
     def run_processing(self):
         if self.radio_60.isChecked():
             fps = 60
@@ -539,7 +619,14 @@ class MainWindow(QMainWindow):
             self.append_text("已启用GPU加速模式。")
         else:
             self.append_text("使用CPU模式处理。")
-        self.processor = VideoProcessor(self.video_a_path, self.video_b_path, self.output_path, fps, self.temp_dir, use_gpu)
+        task_id = str(uuid.uuid4())
+        self.telemetry.track(telemetry_events.EVENT_TASK_STARTED, {
+            "task_id": task_id,
+            "fps": fps,
+            "use_gpu": use_gpu,
+        })
+        self.processor = VideoProcessor(self.video_a_path, self.video_b_path, self.output_path, fps, self.temp_dir, use_gpu,
+                                        telemetry=self.telemetry, task_id=task_id)
         self.processor.progress.connect(self.update_progress)
         self.processor.status.connect(self.append_text)
         self.processor.finished.connect(self.processing_finished)
@@ -556,6 +643,7 @@ class MainWindow(QMainWindow):
         self.radio_120.setEnabled(enabled)
         self.radio_240.setEnabled(enabled)
         self.gpu_checkbox.setEnabled(enabled)
+        self.telemetry_checkbox.setEnabled(enabled)
 
     def update_progress(self, value):
         self.progress_bar.setValue(value)
