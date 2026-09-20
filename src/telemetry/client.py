@@ -8,6 +8,7 @@
 """
 
 import json
+import os
 import queue
 import sys
 import threading
@@ -17,7 +18,7 @@ from datetime import datetime, timezone, timedelta
 
 from . import events as ev
 
-# 部署埋点服务端后改成实际地址
+# 部署埋点服务端后改成实际地址；本地调试可用环境变量 AB_TELEMETRY_ENDPOINT 覆盖
 DEFAULT_ENDPOINT = "https://telemetry.example.com/api/events"
 
 APP_VERSION = "1.0.0"
@@ -32,7 +33,7 @@ class TelemetryClient:
     def __init__(self, config, endpoint=DEFAULT_ENDPOINT,
                  app_version=APP_VERSION, app_build=APP_BUILD):
         self._config = config
-        self._endpoint = endpoint
+        self._endpoint = os.environ.get("AB_TELEMETRY_ENDPOINT", endpoint)
         self._app_version = app_version
         self._app_build = app_build
         self._queue = queue.Queue(maxsize=200)
