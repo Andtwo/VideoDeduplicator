@@ -199,7 +199,8 @@ class VideoProcessor(QThread):
                 raise RuntimeError(f"FFmpeg写入视频失败: {log_tail}")
             self.progress.emit(90)
             self.status.emit(f"处理音轨... (t={time.time() - start_time:.2f}s)")
-            self._compose_audio(temp_output_path, self.output_path, speed,
+            out_duration = written_frames / self.fps
+            self._compose_audio(temp_output_path, self.output_path, speed, out_duration,
                                 os.path.join(self.temp_dir, "ffmpeg_audio.log"))
             self.progress.emit(100)
             self.status.emit(f"视频处理完成! (总耗时: {time.time() - start_time:.2f}s)")
@@ -238,13 +239,75 @@ class VideoProcessor(QThread):
             parts.append(f"特效[{effect_pipeline.fx_style}] {self.options.fx_strength * 100:.0f}%")
         if self.options.sticker_enabled:
             parts.append("四角贴纸")
+        if self.options.audio_mode == "replace_bgm":
+            parts.append("BGM替换")
+        elif self.options.audio_mode == "mix_bgm":
+            parts.append("BGM混音")
+        elif self.options.audio_mode == "replace_voice":
+            parts.append("配音替换")
         if parts:
             self.status.emit("后期参数: " + ", ".join(parts))
         else:
             self.status.emit("后期处理未启用，仅帧混合。")
 
-    def _compose_audio(self, temp_output_path, output_path, speed, audio_log_path):
-        """音轨合成：变速时 atempo 处理原声，无音轨则纯视频输出。"""
+    def _compose_audio(self, temp_output_path, output_path, speed, out_duration, audio_log_path):
+        """音轨合成：变速 atempo、BGM 替换/混音、配音替换，最后与视频流封装。"""
+        opts = self.options
+        mode = opts.audio_mode
+
+        if mode == "original":
+            self._compose_original_audio(temp_output_path, output_path, speed, audio_log_path)
+            return
+
+        if not opts.audio_file or not os.path.exists(opts.audio_file):
+            raise ValueError(f"当前音频模式需要有效的音频文件: {opts.audio_file or '（未选择）'}")
+
+        temp_audio = os.path.join(self.temp_dir, "temp_audio.m4a")
+        has_voice = has_audio_stream(self.video_a_path)
+        if mode == "replace_voice":
+            # 配音替换：外部音频作为唯一音轨，音量不衰减，循环/截断对齐时长
+            self.status.emit(f"使用配音替换原声: {os.path.basename(opts.audio_file)}")
+            run_ffmpeg([
+                'ffmpeg', '-y', '-stream_loop', '-1', '-i', opts.audio_file,
+                '-filter_complex', '[0:a]volume=1.0[a]', '-map', '[a]',
+                '-t', f'{out_duration:.3f}',
+                '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', temp_audio
+            ], audio_log_path)
+        elif mode == "replace_bgm" or not has_voice:
+            if mode == "mix_bgm" and not has_voice:
+                self.status.emit("视频A无音轨，混音模式降级为 BGM 替换。")
+            else:
+                self.status.emit(f"使用 BGM 替换原声: {os.path.basename(opts.audio_file)}")
+            run_ffmpeg([
+                'ffmpeg', '-y', '-stream_loop', '-1', '-i', opts.audio_file,
+                '-filter_complex', f'[0:a]volume={opts.bgm_volume:.2f}[a]', '-map', '[a]',
+                '-t', f'{out_duration:.3f}',
+                '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', temp_audio
+            ], audio_log_path)
+        else:
+            # mix_bgm：原声（变速后）+ BGM 混音
+            self.status.emit(f"原声与 BGM 混音（BGM 音量 {opts.bgm_volume:.0%}）: {os.path.basename(opts.audio_file)}")
+            voice_chain = f'[0:a]atempo={speed:.4f}[a0]' if speed > 1.001 else '[0:a]anull[a0]'
+            run_ffmpeg([
+                'ffmpeg', '-y', '-i', self.video_a_path, '-stream_loop', '-1', '-i', opts.audio_file,
+                '-filter_complex',
+                f'{voice_chain};[1:a]volume={opts.bgm_volume:.2f}[a1];'
+                f'[a0][a1]amix=inputs=2:duration=first:normalize=0[aout]',
+                '-map', '[aout]', '-t', f'{out_duration:.3f}',
+                '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2', temp_audio
+            ], audio_log_path)
+
+        run_ffmpeg([
+            'ffmpeg', '-y', '-i', temp_output_path, '-i', temp_audio,
+            '-map', '0:v', '-map', '1:a', '-c', 'copy', '-shortest', output_path
+        ], audio_log_path)
+        try:
+            os.remove(temp_audio)
+        except OSError:
+            pass
+
+    def _compose_original_audio(self, temp_output_path, output_path, speed, audio_log_path):
+        """保留原声模式：变速时 atempo 处理原声，无音轨则纯视频输出。"""
         audio_available = has_audio_stream(self.video_a_path)
         if audio_available and speed > 1.001:
             temp_audio = os.path.join(self.temp_dir, "temp_audio.m4a")

@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 FILTER_STYLES = ["random", "warm", "cool", "vintage", "mono", "bright"]
 FX_STYLES = ["random", "grain", "vignette", "bloom", "leak"]
 
+# ⑤ 音频模式：保留原声 / BGM替换 / 原声+BGM混音 / 外部配音替换
+AUDIO_MODES = ["original", "replace_bgm", "mix_bgm", "replace_voice"]
+
 
 @dataclass
 class ProcessingOptions:
@@ -37,6 +40,11 @@ class ProcessingOptions:
     # ⑧ 四角贴纸（四角随机贴纸，大小随机）
     sticker_enabled: bool = False
 
+    # ⑤ 音频：BGM 替换 / 混音 / 配音替换
+    audio_mode: str = "original"
+    audio_file: str = ""      # BGM 或配音文件路径
+    bgm_volume: float = 0.3   # BGM 音量（替换与混音模式生效）
+
     def sample_randoms(self, rng):
         """任务开始时确定本条视频的随机参数，返回 dict。同一次任务内保持一致。"""
         speed = rng.uniform(self.speed_min, self.speed_max) if self.speed_enabled else 1.0
@@ -62,4 +70,6 @@ class ProcessingOptions:
             names.append("fx")
         if self.sticker_enabled:
             names.append("sticker")
+        if self.audio_mode != "original":
+            names.append(self.audio_mode)
         return names

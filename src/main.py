@@ -308,6 +308,7 @@ class MainWindow(QMainWindow):
         self.video_a_path = ""
         self.video_b_path = ""
         self.output_path = ""
+        self.audio_file_path = ""
         self.temp_dir = os.path.join(os.path.expanduser("~"), ".video_temp_optimized")
         if not os.path.exists(self.temp_dir):
             os.makedirs(self.temp_dir)
@@ -382,6 +383,33 @@ class MainWindow(QMainWindow):
         self.sticker_check, sticker_row = self._row_start("⑧ 四角贴纸（随机样式与位置）")
         self._row_end(rows_layout, sticker_row)
 
+        # ⑤ 音频：BGM / 配音
+        self.audio_check = QCheckBox("⑤ 换 BGM / 配音")
+        audio_row = QHBoxLayout()
+        audio_row.setSpacing(8)
+        audio_row.addWidget(self.audio_check)
+        self.audio_mode_combo = QComboBox()
+        self.audio_mode_combo.addItems(["BGM 替换原声", "原声 + BGM 混音", "配音替换原声"])
+        self.audio_mode_combo.setEnabled(False)
+        self.btn_audio_file = QPushButton("选择音频")
+        self.btn_audio_file.setObjectName("select_button")
+        self.btn_audio_file.setEnabled(False)
+        self.btn_audio_file.clicked.connect(self.select_audio_file)
+        self.audio_volume_spin = self._spin(30.0, 0.0, 100.0, 5.0, "%")
+        self.audio_volume_spin.setEnabled(False)
+        self.audio_volume_spin.setToolTip("BGM 音量（配音替换模式不生效）")
+        self.label_audio_file = QLabel("未选择")
+        self.label_audio_file.setObjectName("path_label")
+        audio_row.addWidget(self.audio_mode_combo)
+        audio_row.addWidget(self.btn_audio_file)
+        audio_row.addWidget(self.label_audio_file, 1)
+        audio_row.addWidget(QLabel("音量"))
+        audio_row.addWidget(self.audio_volume_spin)
+        self.audio_check.toggled.connect(self.on_audio_enabled)
+        holder = QWidget()
+        holder.setLayout(audio_row)
+        rows_layout.addWidget(holder)
+
         rows.setLayout(rows_layout)
         scroll = QScrollArea()
         scroll.setWidget(rows)
@@ -415,6 +443,19 @@ class MainWindow(QMainWindow):
         spin.setFixedWidth(90)
         return spin
 
+    def select_audio_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "选择 BGM / 配音文件", "",
+                                              "音频文件 (*.mp3 *.wav *.m4a *.aac *.flac *.ogg)")
+        if path:
+            self.audio_file_path = path
+            self.label_audio_file.setText(os.path.basename(path))
+            self.label_audio_file.setToolTip(path)
+
+    def on_audio_enabled(self, checked):
+        self.audio_mode_combo.setEnabled(checked)
+        self.btn_audio_file.setEnabled(checked)
+        self.audio_volume_spin.setEnabled(checked)
+
     def build_options(self):
         """从 UI 收集 ProcessingOptions。"""
         style_map_f = {0: "random", 1: "warm", 2: "cool", 3: "vintage", 4: "mono", 5: "bright"}
@@ -436,6 +477,10 @@ class MainWindow(QMainWindow):
             fx_style=style_map_x[self.fx_style_combo.currentIndex()],
             fx_strength=self.fx_strength_spin.value() / 100.0,
             sticker_enabled=self.sticker_check.isChecked(),
+            audio_mode=({0: "replace_bgm", 1: "mix_bgm", 2: "replace_voice"}[self.audio_mode_combo.currentIndex()]
+                        if self.audio_check.isChecked() else "original"),
+            audio_file=getattr(self, "audio_file_path", ""),
+            bgm_volume=self.audio_volume_spin.value() / 100.0,
         )
 
     def select_video_a(self):
@@ -514,6 +559,11 @@ class MainWindow(QMainWindow):
             self.append_text("使用CPU模式处理。")
         task_id = str(uuid.uuid4())
         options = self.build_options()
+        if options.audio_mode != "original" and not options.audio_file:
+            self.text_output.append("❌ 请先选择 BGM / 配音音频文件")
+            self.progress_bar.setStyleSheet("QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e74c3c, stop:1 #c0392b); border-radius: 5px; }")
+            self.set_controls_enabled(True)
+            return
         self.telemetry.track(telemetry_events.EVENT_TASK_STARTED, {
             "task_id": task_id,
             "fps": fps,
@@ -543,8 +593,12 @@ class MainWindow(QMainWindow):
         for w in (self.speed_check, self.speed_random_check, self.speed_min_spin, self.speed_max_spin,
                   self.zoom_check, self.zoom_random_check, self.zoom_min_spin, self.zoom_max_spin,
                   self.mirror_check, self.filter_check, self.filter_style_combo, self.filter_strength_spin,
-                  self.fx_check, self.fx_style_combo, self.fx_strength_spin, self.sticker_check):
-            w.setEnabled(enabled)
+                  self.fx_check, self.fx_style_combo, self.fx_strength_spin, self.sticker_check,
+                  self.audio_check, self.audio_mode_combo, self.btn_audio_file, self.audio_volume_spin):
+            if w is self.audio_mode_combo or w is self.btn_audio_file or w is self.audio_volume_spin:
+                w.setEnabled(enabled and self.audio_check.isChecked())
+            else:
+                w.setEnabled(enabled)
 
     def update_progress(self, value):
         self.progress_bar.setValue(value)
