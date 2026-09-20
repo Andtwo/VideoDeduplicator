@@ -196,6 +196,14 @@ async def receive_event(request: Request):
     return {"ok": True}
 
 
+@app.get("/")
+async def root():
+    return {
+        "service": "ab-video-processor-telemetry",
+        "endpoints": ["POST /api/events", "GET /api/health", "GET /api/stats"],
+    }
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
