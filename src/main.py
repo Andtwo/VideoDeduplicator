@@ -425,7 +425,7 @@ class VideoProcessor(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AB视频去重工具")
+        self.setWindowTitle("AB Video Processor")
         try:
             self.setWindowIcon(QIcon(":/logo.png"))
         except:
@@ -449,7 +449,7 @@ class MainWindow(QMainWindow):
         video_a_frame = QFrame()
         video_a_layout = QHBoxLayout()
         video_a_layout.setSpacing(10)
-        video_a_title = QLabel("视频A路径（搬运）")
+        video_a_title = QLabel("视频A（内容视频）")
         video_a_title.setObjectName("section_title")
         self.label_a = QLabel("未选择")
         self.label_a.setObjectName("path_label")
@@ -465,7 +465,7 @@ class MainWindow(QMainWindow):
         video_b_frame = QFrame()
         video_b_layout = QHBoxLayout()
         video_b_layout.setSpacing(10)
-        video_b_title = QLabel("视频B路径（原创）")
+        video_b_title = QLabel("视频B（填充素材）")
         video_b_title.setObjectName("section_title")
         self.label_b = QLabel("未选择")
         self.label_b.setObjectName("path_label")
@@ -497,12 +497,12 @@ class MainWindow(QMainWindow):
         options_frame = QFrame()
         options_layout = QVBoxLayout()
         options_layout.setSpacing(15)
-        fps_title = QLabel("去重强度")
+        fps_title = QLabel("处理强度")
         fps_title.setObjectName("section_title")
         options_layout.addWidget(fps_title)
-        self.radio_60 = QRadioButton("去重率50%（DY+TK）")
-        self.radio_120 = QRadioButton("去重率75%（仅TK）")
-        self.radio_240 = QRadioButton("去重率87.5%（仅TK）")
+        self.radio_60 = QRadioButton("50%（60fps）")
+        self.radio_120 = QRadioButton("75%（120fps）")
+        self.radio_240 = QRadioButton("87.5%（240fps）")
         self.radio_60.setChecked(True)
         fps_button_group = QButtonGroup(self)
         fps_button_group.addButton(self.radio_60)
@@ -685,7 +685,7 @@ class MainWindow(QMainWindow):
         error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
         if hasattr(self, 'text_output'):
             self.show_error(f"发生未捕获的异常：\n{error_msg}")
-            self.setWindowTitle("AB视频去重工具 - 发生严重错误")
+            self.setWindowTitle("AB Video Processor - 发生严重错误")
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
 if __name__ == "__main__":
