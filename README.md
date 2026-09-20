@@ -19,7 +19,15 @@
 - 读取两段视频并分析基础媒体信息（分辨率、帧率、时长、编码格式）
 - 按配置进行抽帧与帧混合，提供 50%（60fps）、75%（120fps）、87.5%（240fps）三档处理强度
 - 自动将素材视频的分辨率对齐到内容视频，统一帧率与编码参数
-- 完整保留内容视频的原始音轨
+- **后期效果管线**（可选启用，支持随机参数区间，逐任务抽取）：
+  - 变速（1.05 ~ 1.2 倍速，音画同步 atempo）
+  - 中心裁剪缩放（画面放大 110% ~ 120%）
+  - 水平镜像翻转
+  - 滤镜（暖色 / 冷色 / 复古 / 黑白 / 提亮，默认 10% 低强度）
+  - 画面特效（胶片颗粒 / 暗角 / 泛光 / 漏光，低强度）
+  - 四角贴纸（程序化生成的装饰贴纸，位置与角度随机）
+- **包装能力**：字幕条（多行文本或 SRT）、花字、全片进度条、片头片尾（标题动画，同管道单次编码）
+- **音频处理**：保留原声 / BGM 替换 / 原声与 BGM 混音 / 外部配音替换，自动处理变速同步与片头片尾静音对齐
 - 在兼容环境下启用 NVIDIA NVENC 硬件编码加速，大幅提升处理速度
 - 基于 PyQt5 的图形界面，无需命令行知识，实时展示处理进度与详细日志
 - 跨平台运行（Windows / macOS / Linux，需正确安装依赖）
@@ -47,7 +55,10 @@ Video A + Video B
     -> Media inspection
     -> Resolution alignment
     -> Frame sampling and mixing
+    -> Post effects (speed / zoom / mirror / filter / fx / stickers)
+    -> Branding (intro / captions / fancy text / progress bar / outro)
     -> FFmpeg encoding
+    -> Audio composition (atempo / BGM / voice, silence alignment)
     -> Output validation
 ```
 
@@ -68,7 +79,21 @@ Video A + Video B
 | **75%** | 120 | 1 : 3 |
 | **87.5%** | 240 | 1 : 7 |
 
-主要技术：Python、PyQt5、NumPy、OpenCV、FFmpeg。
+主要技术：Python、PyQt5、NumPy、OpenCV、FFmpeg、Pillow。
+
+### 模块结构
+
+```text
+src/
+  main.py       # PyQt5 界面（后期处理面板分两页：画面与音频 / 包装）
+  config.py     # ProcessingOptions 数据模型（全部后期参数集中定义）
+  pipeline.py   # VideoProcessor 线程：帧循环 / 变速筛选 / 音轨合成
+  effects.py    # 像素级效果：缩放 / 镜像 / 滤镜 / 特效 / 贴纸 / 字幕 / 花字 / 进度条
+  branding.py   # 片头片尾帧生成器（渐变背景 + 标题动画）
+  assets.py     # 贴纸程序化生成、SRT 解析、系统字体查找
+  frame_io.py   # FFmpeg rawvideo 管道读写
+  media.py      # 媒体探测 / 分辨率对齐 / 音轨检测
+```
 
 ## 快速开始
 
@@ -95,14 +120,27 @@ python src/main.py
 
 1. 选择两段拥有合法使用权的视频素材（内容视频 A 与素材视频 B）。
 2. 选择处理强度（建议从 60fps 档开始测试）和输出目录。
-3. 如本机具备兼容的 NVIDIA 环境，可启用 GPU 加速。
-4. 启动任务，处理结果保存在 `output` 目录，检查输出视频的画面、音频和时长。
+3. 在“后期处理”面板按需勾选功能：
+   - **画面与音频页**：变速、缩放、镜像、滤镜、特效、贴纸、BGM / 配音；
+   - **包装页**：字幕条（多行文本或 SRT 文件）、花字、进度条、片头片尾。
+   - 变速与缩放支持随机区间（同一任务内参数保持一致，多次任务间随机变化）。
+4. 如本机具备兼容的 NVIDIA 环境，可启用 GPU 加速。
+5. 启动任务，处理结果保存在 `output` 目录，检查输出视频的画面、音频和时长。
+
+## 测试
+
+```bash
+pip install pytest
+python -m pytest tests/ -q
+```
+
+覆盖范围：配置与随机采样、SRT 解析与时间换算、各像素效果、包装层渲染、端到端管线（含无音轨、竖屏、全功能组合等边界场景）。
 
 ## 当前限制
 
 - 输出效果受源视频分辨率、帧率和编码格式影响。
 - GPU 加速依赖本机 FFmpeg 构建与驱动环境。
-- 当前仅包含基础测试工具，尚未建立完整的自动化回归测试。
+- 片头片尾标题字体依赖系统字体查找，缺字体时回退 PIL 默认字体。
 
 ## 📂 更多项目
 
