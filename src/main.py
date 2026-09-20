@@ -5,7 +5,8 @@ from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QFileDialog, QLabel,
                              QRadioButton, QVBoxLayout, QWidget, QProgressBar, QHBoxLayout,
-                             QTextEdit, QFrame, QButtonGroup, QCheckBox)
+                             QTextEdit, QFrame, QButtonGroup, QCheckBox, QScrollArea,
+                             QComboBox, QDoubleSpinBox, QSizePolicy)
 try:
     import resources
 except ImportError:
@@ -13,6 +14,7 @@ except ImportError:
     print("请使用 'pyrcc5 resources.qrc -o resources.py' 生成它。")
 
 from pipeline import VideoProcessor
+from config import ProcessingOptions, FILTER_STYLES, FX_STYLES
 from telemetry import TelemetryClient, TelemetryConfig
 from telemetry import consent as telemetry_consent
 from telemetry import events as telemetry_events
@@ -127,6 +129,51 @@ QTextEdit::verticalScrollBar::add-line, QTextEdit::verticalScrollBar::sub-line {
 QLabel {
     background: transparent;
 }
+QComboBox, QDoubleSpinBox, QSpinBox {
+    background: rgba(60, 60, 80, 0.9);
+    color: #e0e0e0;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 13px;
+    min-height: 18px;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 22px;
+}
+QComboBox QAbstractItemView {
+    background: #2a2a3a;
+    color: #e0e0e0;
+    selection-background-color: #4a90e2;
+    selection-color: #ffffff;
+}
+QDoubleSpinBox::up-button, QSpinBox::up-button,
+QDoubleSpinBox::down-button, QSpinBox::down-button {
+    background: #3a3a55;
+    border: none;
+    width: 18px;
+}
+QDoubleSpinBox::up-button:hover, QSpinBox::up-button:hover,
+QDoubleSpinBox::down-button:hover, QSpinBox::down-button:hover {
+    background: #4a90e2;
+}
+QScrollArea {
+    border: none;
+    background: transparent;
+}
+QLineEdit, QTextEdit#caption_edit {
+    background: rgba(60, 60, 80, 0.9);
+    color: #e0e0e0;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 13px;
+}
+QLabel#param_label {
+    font-size: 13px;
+    color: #b0b0c0;
+}
 """
 
 
@@ -222,6 +269,9 @@ class MainWindow(QMainWindow):
         fps_options_layout.addWidget(self.radio_240)
         fps_options_layout.addStretch()
         options_layout.addLayout(fps_options_layout)
+        options_frame.setLayout(options_layout)
+        main_layout.addWidget(options_frame)
+        main_layout.addWidget(self._build_post_section())
         gpu_title = QLabel("性能选项")
         options_layout.addWidget(gpu_title)
         self.gpu_checkbox = QCheckBox("启用GPU加速（需要NVIDIA显卡和驱动）")
@@ -261,6 +311,132 @@ class MainWindow(QMainWindow):
         self.temp_dir = os.path.join(os.path.expanduser("~"), ".video_temp_optimized")
         if not os.path.exists(self.temp_dir):
             os.makedirs(self.temp_dir)
+
+    def _build_post_section(self):
+        """构建后期处理配置面板（可滚动）。"""
+        frame = QFrame()
+        layout = QVBoxLayout(frame)
+        layout.setSpacing(8)
+        title = QLabel("后期处理")
+        title.setObjectName("section_title")
+        layout.addWidget(title)
+
+        rows = QWidget()
+        rows_layout = QVBoxLayout(rows)
+        rows_layout.setSpacing(10)
+        rows_layout.setContentsMargins(4, 4, 4, 4)
+
+        # ① 变速
+        self.speed_check, speed_row = self._row_start("① 变速（倍速）")
+        self.speed_random_check = QCheckBox("随机")
+        self.speed_random_check.setChecked(True)
+        self.speed_min_spin = self._spin(1.05, 1.0, 2.0, 0.05, "倍")
+        self.speed_max_spin = self._spin(1.20, 1.0, 2.0, 0.05, "倍")
+        speed_row.addWidget(QLabel("速度"))
+        speed_row.addWidget(self.speed_min_spin)
+        speed_row.addWidget(QLabel("~"))
+        speed_row.addWidget(self.speed_max_spin)
+        speed_row.addWidget(self.speed_random_check)
+        self._row_end(rows_layout, speed_row)
+
+        # ② 裁剪缩放
+        self.zoom_check, zoom_row = self._row_start("② 画面放大")
+        self.zoom_random_check = QCheckBox("随机")
+        self.zoom_random_check.setChecked(True)
+        self.zoom_min_spin = self._spin(110.0, 100.0, 200.0, 5.0, "%")
+        self.zoom_max_spin = self._spin(120.0, 100.0, 200.0, 5.0, "%")
+        zoom_row.addWidget(QLabel("幅度"))
+        zoom_row.addWidget(self.zoom_min_spin)
+        zoom_row.addWidget(QLabel("~"))
+        zoom_row.addWidget(self.zoom_max_spin)
+        zoom_row.addWidget(self.zoom_random_check)
+        self._row_end(rows_layout, zoom_row)
+
+        # ③ 镜像
+        self.mirror_check, mirror_row = self._row_start("③ 镜像翻转（水平）")
+        self._row_end(rows_layout, mirror_row)
+
+        # ⑥ 滤镜
+        self.filter_check, filter_row = self._row_start("⑥ 滤镜")
+        self.filter_style_combo = QComboBox()
+        self.filter_style_combo.addItems(["随机", "暖色", "冷色", "复古", "黑白", "明亮"])
+        self.filter_strength_spin = self._spin(10.0, 0.0, 100.0, 1.0, "%")
+        filter_row.addWidget(QLabel("风格"))
+        filter_row.addWidget(self.filter_style_combo)
+        filter_row.addWidget(QLabel("强度"))
+        filter_row.addWidget(self.filter_strength_spin)
+        self._row_end(rows_layout, filter_row)
+
+        # ⑦ 画面特效
+        self.fx_check, fx_row = self._row_start("⑦ 画面特效")
+        self.fx_style_combo = QComboBox()
+        self.fx_style_combo.addItems(["随机", "噪点", "暗角", "柔光", "漏光"])
+        self.fx_strength_spin = self._spin(12.0, 0.0, 100.0, 1.0, "%")
+        fx_row.addWidget(QLabel("类型"))
+        fx_row.addWidget(self.fx_style_combo)
+        fx_row.addWidget(QLabel("强度"))
+        fx_row.addWidget(self.fx_strength_spin)
+        self._row_end(rows_layout, fx_row)
+
+        # ⑧ 贴纸
+        self.sticker_check, sticker_row = self._row_start("⑧ 四角贴纸（随机样式与位置）")
+        self._row_end(rows_layout, sticker_row)
+
+        rows.setLayout(rows_layout)
+        scroll = QScrollArea()
+        scroll.setWidget(rows)
+        scroll.setWidgetResizable(True)
+        scroll.setFixedHeight(240)
+        layout.addWidget(scroll)
+        frame.setLayout(layout)
+        return frame
+
+    def _row_start(self, text):
+        check = QCheckBox(text)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(check)
+        return check, row
+
+    def _row_end(self, parent_layout, row):
+        row.addStretch()
+        holder = QWidget()
+        holder.setLayout(row)
+        parent_layout.addWidget(holder)
+
+    def _spin(self, value, minimum, maximum, step, suffix=""):
+        spin = QDoubleSpinBox()
+        spin.setRange(minimum, maximum)
+        spin.setSingleStep(step)
+        spin.setDecimals(1)
+        spin.setValue(value)
+        if suffix:
+            spin.setSuffix(suffix)
+        spin.setFixedWidth(90)
+        return spin
+
+    def build_options(self):
+        """从 UI 收集 ProcessingOptions。"""
+        style_map_f = {0: "random", 1: "warm", 2: "cool", 3: "vintage", 4: "mono", 5: "bright"}
+        style_map_x = {0: "random", 1: "grain", 2: "vignette", 3: "bloom", 4: "leak"}
+        return ProcessingOptions(
+            speed_enabled=self.speed_check.isChecked(),
+            speed_random=self.speed_random_check.isChecked(),
+            speed_min=self.speed_min_spin.value(),
+            speed_max=max(self.speed_min_spin.value(), self.speed_max_spin.value()),
+            zoom_enabled=self.zoom_check.isChecked(),
+            zoom_random=self.zoom_random_check.isChecked(),
+            zoom_min=self.zoom_min_spin.value() / 100.0,
+            zoom_max=max(self.zoom_min_spin.value(), self.zoom_max_spin.value()) / 100.0,
+            mirror_enabled=self.mirror_check.isChecked(),
+            filter_enabled=self.filter_check.isChecked(),
+            filter_style=style_map_f[self.filter_style_combo.currentIndex()],
+            filter_strength=self.filter_strength_spin.value() / 100.0,
+            fx_enabled=self.fx_check.isChecked(),
+            fx_style=style_map_x[self.fx_style_combo.currentIndex()],
+            fx_strength=self.fx_strength_spin.value() / 100.0,
+            sticker_enabled=self.sticker_check.isChecked(),
+        )
 
     def select_video_a(self):
         path, _ = QFileDialog.getOpenFileName(self, "选择视频A", "", "视频文件 (*.mp4 *.avi *.mov)")
@@ -337,12 +513,15 @@ class MainWindow(QMainWindow):
         else:
             self.append_text("使用CPU模式处理。")
         task_id = str(uuid.uuid4())
+        options = self.build_options()
         self.telemetry.track(telemetry_events.EVENT_TASK_STARTED, {
             "task_id": task_id,
             "fps": fps,
             "use_gpu": use_gpu,
+            "features": options.enabled_features(),
         })
-        self.processor = VideoProcessor(self.video_a_path, self.video_b_path, self.output_path, fps, self.temp_dir, use_gpu,
+        self.processor = VideoProcessor(self.video_a_path, self.video_b_path, self.output_path, fps, self.temp_dir,
+                                        options=options, use_gpu=use_gpu,
                                         telemetry=self.telemetry, task_id=task_id)
         self.processor.progress.connect(self.update_progress)
         self.processor.status.connect(self.append_text)
@@ -361,6 +540,11 @@ class MainWindow(QMainWindow):
         self.radio_240.setEnabled(enabled)
         self.gpu_checkbox.setEnabled(enabled)
         self.telemetry_checkbox.setEnabled(enabled)
+        for w in (self.speed_check, self.speed_random_check, self.speed_min_spin, self.speed_max_spin,
+                  self.zoom_check, self.zoom_random_check, self.zoom_min_spin, self.zoom_max_spin,
+                  self.mirror_check, self.filter_check, self.filter_style_combo, self.filter_strength_spin,
+                  self.fx_check, self.fx_style_combo, self.fx_strength_spin, self.sticker_check):
+            w.setEnabled(enabled)
 
     def update_progress(self, value):
         self.progress_bar.setValue(value)
