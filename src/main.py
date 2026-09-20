@@ -1,14 +1,8 @@
 import os
 import sys
-import cv2
 import uuid
-import time
-import ffmpeg
-import itertools
-import subprocess
-import numpy as np
 from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QFileDialog, QLabel,
                              QRadioButton, QVBoxLayout, QWidget, QProgressBar, QHBoxLayout,
                              QTextEdit, QFrame, QButtonGroup, QCheckBox)
@@ -18,6 +12,7 @@ except ImportError:
     print("警告: 资源文件 'resources.py' 未找到。图标可能无法显示。")
     print("请使用 'pyrcc5 resources.qrc -o resources.py' 生成它。")
 
+from pipeline import VideoProcessor
 from telemetry import TelemetryClient, TelemetryConfig
 from telemetry import consent as telemetry_consent
 from telemetry import events as telemetry_events
@@ -78,7 +73,7 @@ QRadioButton::indicator:checked, QCheckBox::indicator:checked {
     background: #ffd700;
     border: 2px solid #ffd700;
 }
-QRadioButton::indicator:hover, QCheckBox::indicator:hover {
+QRadioButton::indicator:hover, QCheckBox::indicator {
     border: 2px solid #ffea00;
 }
 QPushButton#run_button {
@@ -134,293 +129,6 @@ QLabel {
 }
 """
 
-def get_video_info(video_path):
-    try:
-        probe = ffmpeg.probe(video_path, cmd='ffprobe')
-        video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
-        if not video_stream:
-            raise ValueError("未找到视频流")
-        width = int(video_stream['width'])
-        height = int(video_stream['height'])
-        r_frame_rate = video_stream.get('r_frame_rate', '0/1')
-        if '/' in r_frame_rate:
-            num, den = map(int, r_frame_rate.split('/'))
-            fps = num / den if den > 0 else 0
-        else:
-            fps = float(r_frame_rate)
-        duration_str = video_stream.get('duration')
-        if duration_str:
-            duration = float(duration_str)
-        else:
-            duration = float(probe.get('format', {}).get('duration', 0))
-        total_frames_str = video_stream.get('nb_frames', '0')
-        if total_frames_str != '0' and total_frames_str.isdigit():
-             total_frames = int(total_frames_str)
-        else:
-            if duration > 0 and fps > 0:
-                total_frames = int(duration * fps)
-            else:
-                cap = cv2.VideoCapture(video_path)
-                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                cap.release()
-        if fps == 0 or total_frames == 0 or duration == 0:
-            raise ValueError("视频元数据不完整或无效 (fps/duration/frames is zero)")
-        return width, height, fps, duration, total_frames
-    except Exception as e:
-        try:
-            cap = cv2.VideoCapture(video_path)
-            if not cap.isOpened():
-                raise ValueError(f"无法打开视频文件: {video_path}")
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            duration = total_frames / fps if fps > 0 else 0
-            cap.release()
-            if fps == 0 or total_frames == 0:
-                raise ValueError("OpenCV无法获取有效的视频信息")
-            return width, height, fps, duration, total_frames
-        except Exception as cv_e:
-            raise RuntimeError(f"无法获取视频信息 {video_path}: FFmpeg错误: {e}, OpenCV回退错误: {cv_e}")
-
-def resize_video(input_path, output_path, width, height, use_gpu=False):
-    if not os.path.exists(input_path):
-        raise FileNotFoundError(f"输入视频文件 {input_path} 不存在！")
-    encoder = 'h264_nvenc' if use_gpu else 'libx264'
-    quality_param = '-preset p6' if use_gpu else '-crf 23'
-    cmd_list = [
-        'ffmpeg', '-y', '-i', input_path,
-        '-vf', f'scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2',
-        '-c:v', encoder,
-    ]
-    cmd_list.extend(quality_param.split())
-    cmd_list.extend(['-c:a', 'aac', '-b:a', '128k', output_path])
-    try:
-        creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-        result = subprocess.run(
-            cmd_list,
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            creationflags=creation_flags
-        )
-        if not os.path.exists(output_path):
-            raise RuntimeError(f"FFmpeg未能创建输出文件 {output_path}")
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"FFmpeg处理失败：\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
-
-def frame_reader(video_path, width, height):
-    command = [
-        'ffmpeg', '-i', video_path,
-        '-f', 'image2pipe', '-pix_fmt', 'bgr24', '-vcodec', 'rawvideo', '-'
-    ]
-    creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-    pipe = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        bufsize=width*height*3*10,
-        creationflags=creation_flags
-    )
-    frame_size = width * height * 3
-    try:
-        while True:
-            raw_frame = pipe.stdout.read(frame_size)
-            if not raw_frame or len(raw_frame) != frame_size:
-                break
-            frame = np.frombuffer(raw_frame, dtype='uint8').reshape((height, width, 3))
-            yield frame
-    finally:
-        pipe.kill()
-        pipe.wait()
-
-def get_a_positions(fps, N_a):
-    if fps == 60:
-        return {m if m <= 2 else 2 + 2 * (m - 2) for m in range(N_a)}
-    elif fps == 120:
-        return {m if m <= 1 else 1 + 4 * (m - 1) for m in range(N_a)}
-    elif fps == 240:
-        if N_a == 0: return set()
-        if N_a <= 2: return set(range(N_a))
-        positions = {0, 1}
-        next_pos = 1
-        intervals = [8, 9, 7]
-        for i in range(2, N_a):
-            next_pos += intervals[(i - 2) % 3]
-            positions.add(next_pos)
-        return positions
-    else:
-        raise ValueError("不支持的帧率！")
-
-class VideoProcessor(QThread):
-    progress = pyqtSignal(int)
-    status = pyqtSignal(str)
-    finished = pyqtSignal()
-    error = pyqtSignal(str)
-
-    def __init__(self, video_a_path, video_b_path, output_path, fps, temp_dir, use_gpu=False,
-                 telemetry=None, task_id=None):
-        super().__init__()
-        self.video_a_path = video_a_path
-        self.video_b_path = video_b_path
-        self.output_path = output_path
-        self.fps = fps
-        self.temp_dir = temp_dir
-        self.use_gpu = use_gpu
-        self.telemetry = telemetry
-        self.task_id = task_id
-
-    def run(self):
-        start_time = time.time()
-        writer_process = None
-        writer_stderr = None
-        width_a = height_a = 0
-        duration_a = 0.0
-        temp_b_path = os.path.join(self.temp_dir, "resized_b.mp4")
-        temp_output_path = os.path.join(self.temp_dir, "temp_output.mp4")
-        writer_log_path = os.path.join(self.temp_dir, "ffmpeg_writer.log")
-        path_b_to_process = self.video_b_path
-        temp_files_to_clean = [temp_output_path, writer_log_path]
-        reader_a_gen = None
-        reader_b_gen = None
-        try:
-            if not os.path.exists(self.temp_dir):
-                os.makedirs(self.temp_dir)
-            self.status.emit(f"开始处理，检查视频信息... (t={time.time() - start_time:.2f}s)")
-            self.progress.emit(5)
-            width_a, height_a, fps_a, duration_a, total_frames_a = get_video_info(self.video_a_path)
-            self.status.emit(f"视频A信息: {width_a}x{height_a}, {fps_a:.2f}fps, {duration_a:.2f}s, {total_frames_a}帧")
-            width_b, height_b, _, _, _ = get_video_info(self.video_b_path)
-            self.status.emit(f"视频B信息: {width_b}x{height_b}")
-            if not duration_a or duration_a <= 0:
-                raise ValueError("无法获取视频A的有效时长，处理中止。")
-            if (width_a, height_a) != (width_b, height_b):
-                self.status.emit(f"分辨率不一致，将视频B ({width_b}x{height_b}) 调整为视频A的尺寸 ({width_a}x{height_a})... (t={time.time() - start_time:.2f}s)")
-                resize_video(self.video_b_path, temp_b_path, width_a, height_a, self.use_gpu)
-                path_b_to_process = temp_b_path
-                temp_files_to_clean.append(temp_b_path)
-            else:
-                self.status.emit("分辨率一致，跳过尺寸调整。")
-            self.progress.emit(10)
-            total_frames_c = int(duration_a * self.fps)
-            self.status.emit(f"目标视频C: {self.fps}fps, 时长与A一致({duration_a:.2f}s), 总帧数: {total_frames_c}")
-            self.status.emit(f"准备帧序列混合... (t={time.time() - start_time:.2f}s)")
-            positions_a = get_a_positions(self.fps, total_frames_a)
-            encoder = 'h264_nvenc' if self.use_gpu else 'libx264'
-            quality_param = '-preset p6' if self.use_gpu else '-crf 23'
-            writer_cmd = [
-                'ffmpeg', '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo',
-                '-pix_fmt', 'bgr24', '-s', f'{width_a}x{height_a}', '-r', str(self.fps),
-                '-i', '-', '-c:v', encoder
-            ]
-            writer_cmd.extend(quality_param.split())
-            writer_cmd.extend(['-pix_fmt', 'yuv420p', temp_output_path])
-            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            # stderr 写入日志文件：避免长视频时 stderr 管道缓冲区写满导致互相死锁
-            writer_stderr = open(writer_log_path, "wb")
-            writer_process = subprocess.Popen(
-                writer_cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=writer_stderr,
-                creationflags=creation_flags
-            )
-            self.status.emit(f"开始混合帧... (t={time.time() - start_time:.2f}s)")
-            self.progress.emit(20)
-            try:
-                reader_a_gen = frame_reader(self.video_a_path, width_a, height_a)
-                reader_b_gen = frame_reader(path_b_to_process, width_a, height_a)
-                reader_b_cycled = itertools.cycle(reader_b_gen)
-                a_frame_counter = 0
-                for i in range(total_frames_c):
-                    frame_to_write = None
-                    try:
-                        if i in positions_a and a_frame_counter < total_frames_a:
-                            frame_to_write = next(reader_a_gen)
-                            a_frame_counter += 1
-                        else:
-                            frame_to_write = next(reader_b_cycled)
-                        writer_process.stdin.write(frame_to_write.tobytes())
-                        if (i + 1) % 50 == 0 or (i + 1) == total_frames_c:
-                            progress = 20 + int(70 * (i + 1) / total_frames_c)
-                            self.progress.emit(min(progress, 89))
-                            self.status.emit(f"处理帧: {i + 1} / {total_frames_c} (t={time.time() - start_time:.2f}s)")
-                    except StopIteration:
-                        self.status.emit(f"警告: 视频流在第 {i} 帧提前结束。")
-                        break
-            finally:
-                if reader_a_gen:
-                    reader_a_gen.close()
-                if reader_b_gen:
-                    reader_b_gen.close()
-            self.status.emit(f"混合完成，正在生成最终视频文件... (t={time.time() - start_time:.2f}s)")
-            writer_process.stdin.close()
-            writer_process.stdin = None  # 避免 wait/communicate 对已关闭 stdin 再次 flush
-            writer_process.wait()
-            writer_stderr.close()
-            if writer_process.returncode != 0:
-                with open(writer_log_path, "r", encoding="utf-8", errors="ignore") as f:
-                    log_tail = f.read()[-2000:]
-                raise RuntimeError(f"FFmpeg写入视频失败: {log_tail}")
-            self.progress.emit(90)
-            self.status.emit(f"合并音频... (t={time.time() - start_time:.2f}s)")
-            final_cmd = [
-                'ffmpeg', '-y', '-i', temp_output_path, '-i', self.video_a_path,
-                '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-shortest', self.output_path
-            ]
-            subprocess.run(
-                final_cmd,
-                check=True,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                creationflags=creation_flags
-            )
-            self.progress.emit(100)
-            self.status.emit(f"视频处理完成! (总耗时: {time.time() - start_time:.2f}s)")
-            self._track_task_success(time.time() - start_time, width_a, height_a, duration_a)
-            self.finished.emit()
-        except Exception as e:
-            import traceback
-            self._track_task_failed(e)
-            self.error.emit(f"错误：{str(e)}\n{traceback.format_exc()}")
-        finally:
-            if writer_process and writer_process.poll() is None:
-                writer_process.kill()
-                writer_process.wait()
-            if writer_stderr and not writer_stderr.closed:
-                writer_stderr.close()
-            for f in temp_files_to_clean:
-                if os.path.exists(f):
-                    try:
-                        os.remove(f)
-                    except OSError as e:
-                        self.status.emit(f"无法删除临时文件 {f}: {e}")
-
-    def _track_task_success(self, elapsed, width_a, height_a, duration_a):
-        if not self.telemetry:
-            return
-        self.telemetry.track(telemetry_events.EVENT_TASK_SUCCESS, {
-            "task_id": self.task_id,
-            "fps": self.fps,
-            "use_gpu": self.use_gpu,
-            "resolution_bucket": telemetry_events.resolution_bucket(width_a, height_a),
-            "duration_bucket": telemetry_events.duration_bucket(duration_a),
-            "processing_seconds_bucket": telemetry_events.processing_seconds_bucket(elapsed),
-        })
-
-    def _track_task_failed(self, exc):
-        if not self.telemetry:
-            return
-        error_type, error_stage = telemetry_events.classify_error(exc, self.use_gpu)
-        self.telemetry.track(telemetry_events.EVENT_TASK_FAILED, {
-            "task_id": self.task_id,
-            "fps": self.fps,
-            "use_gpu": self.use_gpu,
-            "error_type": error_type,
-            "error_stage": error_stage,
-        })
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -515,7 +223,6 @@ class MainWindow(QMainWindow):
         fps_options_layout.addStretch()
         options_layout.addLayout(fps_options_layout)
         gpu_title = QLabel("性能选项")
-        gpu_title.setObjectName("section_title")
         options_layout.addWidget(gpu_title)
         self.gpu_checkbox = QCheckBox("启用GPU加速（需要NVIDIA显卡和驱动）")
         self.gpu_checkbox.setChecked(False)
@@ -687,6 +394,7 @@ class MainWindow(QMainWindow):
             self.show_error(f"发生未捕获的异常：\n{error_msg}")
             self.setWindowTitle("AB Video Processor - 发生严重错误")
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
 
 if __name__ == "__main__":
     if sys.platform.startswith('win'):
