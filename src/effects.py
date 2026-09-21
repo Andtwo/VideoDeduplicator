@@ -44,10 +44,10 @@ class ZoomCrop:
 
 
 class Mirror:
-    """水平镜像翻转。"""
+    """水平镜像翻转（返回连续内存，保证后续 cv2 调用跨版本安全）。"""
 
     def apply(self, frame, index):
-        return frame[:, ::-1]
+        return np.ascontiguousarray(frame[:, ::-1])
 
 
 def _saturate(img, factor):

@@ -672,11 +672,15 @@ class MainWindow(QMainWindow):
             self.append_text("使用CPU模式处理。")
         task_id = str(uuid.uuid4())
         options = self.build_options()
-        if options.audio_mode != "original" and not options.audio_file:
-            self.text_output.append("❌ 请先选择 BGM / 配音音频文件")
-            self.progress_bar.setStyleSheet("QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e74c3c, stop:1 #c0392b); border-radius: 5px; }")
-            self.set_controls_enabled(True)
-            return
+        if options.audio_mode != "original":
+            if not options.audio_file:
+                self.text_output.append("❌ 请先选择 BGM / 配音音频文件")
+                self._reset_after_validation_error()
+                return
+            if not os.path.exists(options.audio_file):
+                self.text_output.append(f"❌ 音频文件不存在: {options.audio_file}")
+                self._reset_after_validation_error()
+                return
         self.telemetry.track(telemetry_events.EVENT_TASK_STARTED, {
             "task_id": task_id,
             "fps": fps,
@@ -691,6 +695,10 @@ class MainWindow(QMainWindow):
         self.processor.finished.connect(self.processing_finished)
         self.processor.error.connect(self.show_error)
         self.processor.start()
+
+    def _reset_after_validation_error(self):
+        self.progress_bar.setStyleSheet("QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e74c3c, stop:1 #c0392b); border-radius: 5px; }")
+        self.set_controls_enabled(True)
 
     def set_controls_enabled(self, enabled):
         self.btn_a.setEnabled(enabled)
@@ -707,11 +715,12 @@ class MainWindow(QMainWindow):
                   self.zoom_check, self.zoom_random_check, self.zoom_min_spin, self.zoom_max_spin,
                   self.mirror_check, self.filter_check, self.filter_style_combo, self.filter_strength_spin,
                   self.fx_check, self.fx_style_combo, self.fx_strength_spin, self.sticker_check,
-                  self.audio_check, self.caption_check, self.fancy_check, self.progress_check,
+                  self.audio_check, self.audio_mode_combo, self.btn_audio_file, self.audio_volume_spin,
+                  self.caption_check, self.btn_caption_srt,
+                  self.fancy_check, self.progress_check,
                   self.intro_check, self.outro_check, self.caption_edit, self.fancy_edit,
-                  self.intro_edit, self.outro_edit, self.intro_dur_spin, self.outro_dur_spin,
-                  self.btn_caption_srt):
-            if w is self.audio_mode_combo or w is self.btn_audio_file or w is self.audio_volume_spin:
+                  self.intro_edit, self.outro_edit, self.intro_dur_spin, self.outro_dur_spin):
+            if w in (self.audio_mode_combo, self.btn_audio_file, self.audio_volume_spin):
                 w.setEnabled(enabled and self.audio_check.isChecked())
             else:
                 w.setEnabled(enabled)

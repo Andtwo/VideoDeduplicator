@@ -131,3 +131,15 @@ class TestBranding:
         rng = np.random.default_rng(0)
         frames = list(outro_frames(W, H, 30, 0.5, "", rng))
         assert len(frames) == 15
+
+    def test_title_horizontally_centered(self):
+        """标题文本应水平居中（回归: 曾被绘制在左边缘）。"""
+        from branding import intro_frames
+        rng = np.random.default_rng(0)
+        frames = list(intro_frames(W, H, 30, 1.0, "片头", rng))
+        f = frames[-1]  # 淡入完成后 alpha=1
+        region = f[int(H * 0.38):int(H * 0.58)]
+        bright_cols = np.where((region > 200).any(axis=(0, 2)))[0]
+        assert len(bright_cols) > 0, "未检测到标题文本"
+        center = (bright_cols.min() + bright_cols.max()) / 2
+        assert abs(center - W / 2) < W * 0.1, f"标题未居中: 中点 {center:.0f}, 画面中心 {W // 2}"

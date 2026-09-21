@@ -167,7 +167,8 @@ def get_sticker(kind, size):
     cache_path = os.path.join(_CACHE_DIR, f"{kind}_{size}.png")
     if os.path.exists(cache_path):
         try:
-            return Image.open(cache_path).convert("RGBA")
+            with Image.open(cache_path) as cached:
+                return cached.convert("RGBA")
         except Exception:
             pass
     img = _draw_sticker(kind, size)

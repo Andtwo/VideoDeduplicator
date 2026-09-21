@@ -1,7 +1,7 @@
 """片头片尾帧生成：PIL 预渲染背景与文本层，逐帧合成后直接写入编码管道。
 
 帧直接进入主编码器，避免二次编码与 concat 参数对齐问题；
-音频侧由 pipeline 用静音填充（adelay/apad）对齐片头片尾时长。
+音频侧由 pipeline 用静音填充（aevalsrc + concat）对齐片头片尾时长。
 """
 
 import numpy as np
@@ -37,9 +37,9 @@ def _decorations(width, height, rng):
 
 
 def _text_layer(text, width, height):
-    """渲染标题文本层，返回 (rgb float, alpha, y0)。"""
+    """渲染标题文本层，返回 (rgb float, alpha, x0, y0)。"""
     if not text.strip():
-        return None, None, 0
+        return None, None, 0, 0
     font = load_font(max(22, int(height * 0.085)))
     probe = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
     stroke = max(2, height // 240)
@@ -58,7 +58,7 @@ def _text_layer(text, width, height):
     x0 = max(0, (width - img.width) // 2)
     y0 = max(0, int(height * 0.40) - img.height // 2)
     x1, y1 = min(x0 + img.width, width), min(y0 + img.height, height)
-    return rgb[:y1 - y0, :x1 - x0], alpha[:y1 - y0, :x1 - x0], y0
+    return rgb[:y1 - y0, :x1 - x0], alpha[:y1 - y0, :x1 - x0], x0, y0
 
 
 def _frame_iter(width, height, fps, duration, text, rng, mode):
@@ -79,13 +79,15 @@ def _frame_iter(width, height, fps, duration, text, rng, mode):
             dy = 0
         frame = base.copy()
         if layer is not None and alpha > 0.01:
-            rgb, a, y0 = layer
+            rgb, a, x0, y0 = layer
             y_off = max(0, y0 - dy)
             h, w = a.shape[:2]
             y1 = min(y_off + h, height)
-            region = frame[y_off:y1, :w]
-            fa = a[:y1 - y_off] * alpha
-            frame[y_off:y1, :w] = region * (1.0 - fa) + rgb[:y1 - y_off] * fa
+            x1 = min(x0 + w, width)
+            region = frame[y_off:y1, x0:x1]
+            fa = a[:y1 - y_off, :x1 - x0] * alpha
+            frame[y_off:y1, x0:x1] = (region * (1.0 - fa)
+                                      + rgb[:y1 - y_off, :x1 - x0] * fa)
         yield np.clip(frame, 0, 255).astype(np.uint8)
 
 

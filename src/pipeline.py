@@ -241,7 +241,7 @@ class VideoProcessor(QThread):
             self.progress.emit(100)
             self.status.emit(f"视频处理完成! (总耗时: {time.time() - start_time:.2f}s)")
             self._track_task_success(time.time() - start_time, width_a, height_a,
-                                     final_duration, final_duration)
+                                     duration_a, final_duration)
             self.finished.emit()
         except Exception as e:
             import traceback
