@@ -1,0 +1,61 @@
+# Windows EXE 打包流水线
+# 推送到 master 或手动触发时，在 GitHub 的 Windows 环境中用 PyInstaller 打包。
+# 产物（Artifact）：AB-Video-Processor-windows，内含 EXE + ffmpeg/ffprobe，解压即可运行。
+
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Compile Qt resources
+        run: pyrcc5 src/resources.qrc -o src/resources.py
+
+      - name: Build EXE with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onedir --windowed `
+            --name AB-Video-Processor `
+            --icon assets/logo.ico `
+            src/main.py
+
+      - name: Bundle FFmpeg into dist
+        shell: pwsh
+        run: |
+          curl.exe -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-dist
+          $ffmpeg  = Get-ChildItem -Recurse ffmpeg-dist -Filter ffmpeg.exe  | Select-Object -First 1
+          $ffprobe = Get-ChildItem -Recurse ffmpeg-dist -Filter ffprobe.exe | Select-Object -First 1
+          Copy-Item $ffmpeg.FullName  dist/AB-Video-Processor/
+          Copy-Item $ffprobe.FullName dist/AB-Video-Processor/
+
+      - name: Verify dist contents
+        run: |
+          Get-ChildItem dist/AB-Video-Processor -File |
+            Where-Object { $_.Name -match '^(AB-Video-Processor|ffmpeg|ffprobe)\.exe$' }
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AB-Video-Processor-windows
+          path: dist/AB-Video-Processor
+          retention-days: 14
