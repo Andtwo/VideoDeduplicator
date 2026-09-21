@@ -27,9 +27,8 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Compile Qt resources
-        run: pyrcc5 src/resources.qrc -o src/resources.py
-
+      # src/resources.py 已提交到仓库，无需在 CI 中重新执行 pyrcc5
+      # （Windows 环境下 pyrcc5 可能因 Qt 环境问题失败）
       - name: Build EXE with PyInstaller
         run: |
           pyinstaller --noconfirm --onedir --windowed `
