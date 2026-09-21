@@ -32,16 +32,14 @@ class ConsentDialog(QDialog):
 
         label = QLabel(CONSENT_TEXT)
         label.setWordWrap(True)
-        label.setObjectName("path_label")
+        label.setObjectName("consent_text")
         layout.addWidget(label)
 
         buttons = QHBoxLayout()
         buttons.addStretch()
         btn_accept = QPushButton("允许匿名统计")
-        btn_accept.setObjectName("select_button")
         btn_accept.clicked.connect(self._on_accept)
         btn_decline = QPushButton("关闭统计")
-        btn_decline.setObjectName("select_button")
         btn_decline.clicked.connect(self._on_decline)
         buttons.addWidget(btn_accept)
         buttons.addWidget(btn_decline)

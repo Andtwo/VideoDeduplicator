@@ -19,197 +19,185 @@ from telemetry import TelemetryClient, TelemetryConfig
 from telemetry import consent as telemetry_consent
 from telemetry import events as telemetry_events
 
-qss = """
-QWidget {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1e1e2f, stop:1 #141422);
-    color: #e0e0e0;
+# ============ Web3 / Dark-Tech Design System ============
+# 单一强调色（电青 mint），深空黑背景，中性冷灰，细边框卡片，胶囊按钮
+# 形状规则：卡片与输入框 12px，主按钮与状态徽章全圆角
+
+PALETTE = {
+    "bg": "#0b0e14",
+    "surface": "#11151d",
+    "raised": "#1a2130",
+    "input": "#151a24",
+    "border": "#242d3d",
+    "border_hover": "#33405a",
+    "text": "#e6edf6",
+    "muted": "#8b94a7",
+    "accent": "#5eead4",
+    "accent_hover": "#7df0dd",
+    "accent_text": "#062420",
+    "danger": "#f97066",
 }
-QFrame {
-    background: rgba(40, 40, 60, 0.9);
-    border: none;
-    border-radius: 10px;
-    padding: 15px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-}
-QLabel#section_title {
-    font-size: 14px;
-    font-weight: 600;
-    color: #ffffff;
-}
-QLabel#path_label {
-    background: rgba(60, 60, 80, 0.8);
-    border: 1px solid #555;
-    border-radius: 5px;
-    padding: 8px;
-    font-size: 14px;
-    color: #e0e0e0;
-}
-QPushButton#select_button {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4a90e2, stop:1 #357abd);
-    color: white;
-    border: none;
-    padding: 8px 15px;
-    font-size: 14px;
-    border-radius: 5px;
-    transition: all 0.3s;
-}
-QPushButton#select_button:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5aa1f2, stop:1 #4688d1);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-QRadioButton, QCheckBox {
-    font-size: 14px;
-    color: #e0e0e0;
-}
-QRadioButton::indicator, QCheckBox::indicator {
-    width: 20px;
-    height: 20px;
-    border-radius: 5px;
-    border: 2px solid #ffd700;
-    background: #2a2a3a;
-}
-QRadioButton::indicator {
-    border-radius: 10px;
-}
-QRadioButton::indicator:checked, QCheckBox::indicator:checked {
-    background: #ffd700;
-    border: 2px solid #ffd700;
-}
-QRadioButton::indicator:hover, QCheckBox::indicator {
-    border: 2px solid #ffea00;
-}
-QPushButton#run_button {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff7e5f, stop:1 #feb47b);
-    color: white;
-    border: none;
-    padding: 12px 25px;
-    font-size: 16px;
-    font-weight: bold;
-    border-radius: 8px;
-    transition: all 0.3s;
-}
-QPushButton#run_button:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff926f, stop:1 #ffc48b);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-}
-QPushButton#run_button:disabled {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #999, stop:1 #777);
-    color: #ccc;
-}
-QProgressBar {
-    background: rgba(40, 40, 60, 0.8);
-    border-radius: 5px;
-    text-align: center;
-    font-size: 14px;
-    color: #ffffff;
-}
-QProgressBar::chunk {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4a90e2, stop:1 #357abd);
-    border-radius: 5px;
-}
-QTextEdit {
-    background: rgba(30, 30, 50, 0.9);
-    border: 1px solid #555;
-    border-radius: 5px;
-    font-size: 12px;
-    color: #d0d0d0;
-}
-QTextEdit::verticalScrollBar {
-    background: #2a2a3a;
-    width: 10px;
-    margin: 0px;
-}
-QTextEdit::verticalScrollBar::handle {
-    background: #4a90e2;
-    border-radius: 5px;
-}
-QTextEdit::verticalScrollBar::add-line, QTextEdit::verticalScrollBar::sub-line {
-    background: none;
-}
-QLabel {
-    background: transparent;
-}
-QComboBox, QDoubleSpinBox, QSpinBox {
-    background: rgba(60, 60, 80, 0.9);
-    color: #e0e0e0;
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 4px 8px;
+
+qss = f"""
+QWidget {{
+    background-color: {PALETTE['bg']};
+    color: {PALETTE['text']};
+    font-family: 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', sans-serif;
     font-size: 13px;
-    min-height: 18px;
-}
-QComboBox::drop-down {
+}}
+QMainWindow, QDialog {{ background-color: {PALETTE['bg']}; }}
+
+/* ---------- 面板 / 卡片 ---------- */
+QFrame#panel {{
+    background-color: {PALETTE['surface']};
+    border: 1px solid {PALETTE['border']};
+    border-radius: 12px;
+}}
+
+/* ---------- 文本 ---------- */
+QLabel {{ background: transparent; color: {PALETTE['text']}; }}
+QLabel#panel_title {{
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: {PALETTE['muted']};
+}}
+QLabel#field_label {{
+    font-size: 13px;
+    font-weight: 600;
+    min-width: 64px;
+}}
+QLabel#path_label {{
+    background-color: {PALETTE['input']};
+    border: 1px solid {PALETTE['border']};
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: {PALETTE['muted']};
+}}
+QLabel#param_label {{ font-size: 12px; color: {PALETTE['muted']}; }}
+QLabel#status_ready {{ color: {PALETTE['muted']}; font-size: 12px; }}
+QLabel#status_done {{ color: {PALETTE['accent']}; font-size: 12px; font-weight: 600; }}
+QLabel#status_error {{ color: {PALETTE['danger']}; font-size: 12px; font-weight: 600; }}
+
+/* ---------- 按钮 ---------- */
+QPushButton {{
+    background-color: {PALETTE['raised']};
+    color: {PALETTE['text']};
+    border: 1px solid {PALETTE['border']};
+    border-radius: 8px;
+    padding: 7px 14px;
+}}
+QPushButton:hover {{ background-color: {PALETTE['border_hover']}; }}
+QPushButton:pressed {{ background-color: {PALETTE['border']}; }}
+QPushButton:disabled {{ color: {PALETTE['muted']}; background-color: {PALETTE['input']}; }}
+
+QPushButton#run_button {{
+    background-color: {PALETTE['accent']};
+    color: {PALETTE['accent_text']};
     border: none;
-    width: 22px;
-}
-QComboBox QAbstractItemView {
-    background: #2a2a3a;
-    color: #e0e0e0;
-    selection-background-color: #4a90e2;
-    selection-color: #ffffff;
-}
-QDoubleSpinBox::up-button, QSpinBox::up-button,
-QDoubleSpinBox::down-button, QSpinBox::down-button {
-    background: #3a3a55;
+    border-radius: 20px;
+    padding: 10px 40px;
+    font-size: 15px;
+    font-weight: 700;
+}}
+QPushButton#run_button:hover {{ background-color: {PALETTE['accent_hover']}; }}
+QPushButton#run_button:disabled {{
+    background-color: {PALETTE['border']};
+    color: {PALETTE['muted']};
+}}
+
+/* ---------- 复选 / 单选 ---------- */
+QCheckBox, QRadioButton {{ spacing: 8px; color: {PALETTE['text']}; background: transparent; }}
+QCheckBox::indicator, QRadioButton::indicator {{
+    width: 16px;
+    height: 16px;
+    border: 1px solid {PALETTE['border_hover']};
+    background-color: {PALETTE['input']};
+}}
+QCheckBox::indicator {{ border-radius: 5px; }}
+QRadioButton::indicator {{ border-radius: 9px; }}
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
+    background-color: {PALETTE['accent']};
+    border: 1px solid {PALETTE['accent']};
+}}
+QCheckBox:disabled, QRadioButton:disabled {{ color: {PALETTE['muted']}; }}
+
+/* ---------- 输入控件 ---------- */
+QLineEdit, QTextEdit, QComboBox, QDoubleSpinBox, QSpinBox {{
+    background-color: {PALETTE['input']};
+    color: {PALETTE['text']};
+    border: 1px solid {PALETTE['border']};
+    border-radius: 8px;
+    padding: 6px 10px;
+    selection-background-color: {PALETTE['accent']};
+    selection-color: {PALETTE['accent_text']};
+}}
+QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus {{
+    border: 1px solid {PALETTE['accent']};
+}}
+QComboBox::drop-down {{ border: none; width: 24px; }}
+QComboBox QAbstractItemView {{
+    background-color: {PALETTE['surface']};
+    color: {PALETTE['text']};
+    border: 1px solid {PALETTE['border']};
+    selection-background-color: {PALETTE['raised']};
+}}
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button,
+QSpinBox::up-button, QSpinBox::down-button {{
+    background-color: {PALETTE['raised']};
     border: none;
     width: 18px;
-}
-QDoubleSpinBox::up-button:hover, QSpinBox::up-button:hover,
-QDoubleSpinBox::down-button:hover, QSpinBox::down-button:hover {
-    background: #4a90e2;
-}
-QScrollArea {
-    border: none;
-    background: transparent;
-}
-QScrollBar:vertical {
-    background: #2a2a3a;
-    width: 10px;
-    margin: 0px;
-}
-QScrollBar::handle:vertical {
-    background: #4a90e2;
-    border-radius: 5px;
-    min-height: 30px;
-}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0px;
-    background: none;
-}
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-    background: none;
-}
-QTabWidget::pane {
-    border: 1px solid #444;
+}}
+
+/* ---------- 标签页 ---------- */
+QTabWidget::pane {{
+    border: 1px solid {PALETTE['border']};
+    border-radius: 10px;
+    background-color: {PALETTE['bg']};
+    top: -1px;
+}}
+QTabBar::tab {{
+    background-color: transparent;
+    color: {PALETTE['muted']};
+    padding: 8px 16px;
+    font-size: 13px;
+}}
+QTabBar::tab:selected {{
+    color: {PALETTE['text']};
+    border-bottom: 2px solid {PALETTE['accent']};
+}}
+QTabBar::tab:hover {{ color: {PALETTE['text']}; }}
+
+/* ---------- 进度条 ---------- */
+QProgressBar {{
+    background-color: {PALETTE['input']};
+    border: 1px solid {PALETTE['border']};
+    border-radius: 7px;
+    height: 14px;
+    text-align: center;
+    font-size: 11px;
+    color: {PALETTE['muted']};
+}}
+QProgressBar::chunk {{ background-color: {PALETTE['accent']}; border-radius: 6px; }}
+
+/* ---------- 日志 ---------- */
+QTextEdit#log_view {{
+    font-family: 'JetBrains Mono', 'SF Mono', 'Cascadia Mono', 'Consolas', monospace;
+    font-size: 12px;
+    color: {PALETTE['muted']};
+}}
+
+/* ---------- 滚动条 ---------- */
+QScrollArea {{ border: none; background: transparent; }}
+QScrollBar:vertical {{ background: transparent; width: 8px; margin: 4px 2px; }}
+QScrollBar::handle:vertical {{
+    background: {PALETTE['border']};
     border-radius: 4px;
-    background: rgba(35, 35, 50, 0.6);
-}
-QTabBar::tab {
-    background: #2a2a3a;
-    color: #b0b0c0;
-    padding: 6px 14px;
-    margin-right: 2px;
-    border-top-left-radius: 4px;
-    border-top-right-radius: 4px;
-    font-size: 13px;
-}
-QTabBar::tab:selected {
-    background: #3d3d55;
-    color: #fff;
-    border-bottom: 2px solid #4a90e2;
-}
-QLineEdit, QTextEdit#caption_edit {
-    background: rgba(60, 60, 80, 0.9);
-    color: #e0e0e0;
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 4px 8px;
-    font-size: 13px;
-}
-QLabel#param_label {
-    font-size: 13px;
-    color: #b0b0c0;
-}
+    min-height: 32px;
+}}
+QScrollBar::handle:vertical:hover {{ background: {PALETTE['border_hover']}; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; background: none; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
 """
 
 
@@ -221,8 +209,8 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(":/logo.png"))
         except:
             print("图标资源 :logo.png 未找到，请检查resources.qrc和resources.py文件。")
-        self.resize(640, 780)
-        self.setMinimumSize(560, 500)
+        self.resize(700, 800)
+        self.setMinimumSize(620, 540)
         self.init_ui()
         sys.excepthook = self.except_hook
         self.telemetry_config = TelemetryConfig()
@@ -236,116 +224,115 @@ class MainWindow(QMainWindow):
         # 主内容放入滚动区，窗口高度不足时可滚动，内容区域可自由压缩
         content = QWidget()
         main_layout = QVBoxLayout(content)
-        main_layout.setSpacing(12)
-        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(14)
+        main_layout.setContentsMargins(20, 20, 20, 20)
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.NoFrame)
         scroll_area.setWidget(content)
         self.setCentralWidget(scroll_area)
-        video_a_frame = QFrame()
-        video_a_layout = QHBoxLayout()
-        video_a_layout.setSpacing(10)
-        video_a_title = QLabel("视频A（内容视频）")
-        video_a_title.setObjectName("section_title")
+
+        # ---------- 素材面板 ----------
+        inputs_panel = QFrame()
+        inputs_panel.setObjectName("panel")
+        inputs_layout = QVBoxLayout(inputs_panel)
+        inputs_layout.setSpacing(10)
+        inputs_layout.setContentsMargins(16, 14, 16, 16)
+        inputs_title = QLabel("素材输入")
+        inputs_title.setObjectName("panel_title")
+        inputs_layout.addWidget(inputs_title)
+
         self.label_a = QLabel("未选择")
         self.label_a.setObjectName("path_label")
         self.label_a.setWordWrap(True)
-        self.btn_a = QPushButton("选择")
-        self.btn_a.setObjectName("select_button")
+        self.btn_a = QPushButton("浏览")
         self.btn_a.clicked.connect(self.select_video_a)
-        video_a_layout.addWidget(video_a_title)
-        video_a_layout.addWidget(self.label_a, 1)
-        video_a_layout.addWidget(self.btn_a)
-        video_a_frame.setLayout(video_a_layout)
-        main_layout.addWidget(video_a_frame)
-        video_b_frame = QFrame()
-        video_b_layout = QHBoxLayout()
-        video_b_layout.setSpacing(10)
-        video_b_title = QLabel("视频B（填充素材）")
-        video_b_title.setObjectName("section_title")
+        inputs_layout.addLayout(self._file_row("视频 A", "内容视频", self.label_a, self.btn_a))
+
         self.label_b = QLabel("未选择")
         self.label_b.setObjectName("path_label")
         self.label_b.setWordWrap(True)
-        self.btn_b = QPushButton("选择")
-        self.btn_b.setObjectName("select_button")
+        self.btn_b = QPushButton("浏览")
         self.btn_b.clicked.connect(self.select_video_b)
-        video_b_layout.addWidget(video_b_title)
-        video_b_layout.addWidget(self.label_b, 1)
-        video_b_layout.addWidget(self.btn_b)
-        video_b_frame.setLayout(video_b_layout)
-        main_layout.addWidget(video_b_frame)
-        output_frame = QFrame()
-        output_layout = QHBoxLayout()
-        output_layout.setSpacing(10)
-        output_title = QLabel("输出路径")
-        output_title.setObjectName("section_title")
+        inputs_layout.addLayout(self._file_row("视频 B", "填充素材", self.label_b, self.btn_b))
+
         self.label_output = QLabel("未选择")
         self.label_output.setObjectName("path_label")
         self.label_output.setWordWrap(True)
-        self.btn_output = QPushButton("选择")
-        self.btn_output.setObjectName("select_button")
+        self.btn_output = QPushButton("浏览")
         self.btn_output.clicked.connect(self.select_output_path)
-        output_layout.addWidget(output_title)
-        output_layout.addWidget(self.label_output, 1)
-        output_layout.addWidget(self.btn_output)
-        output_frame.setLayout(output_layout)
-        main_layout.addWidget(output_frame)
+        inputs_layout.addLayout(self._file_row("输出", "保存为 .mp4", self.label_output, self.btn_output))
+        main_layout.addWidget(inputs_panel)
+
+        # ---------- 处理选项面板 ----------
         options_frame = QFrame()
-        options_layout = QVBoxLayout()
-        options_layout.setSpacing(15)
-        fps_title = QLabel("处理强度")
-        fps_title.setObjectName("section_title")
-        options_layout.addWidget(fps_title)
-        self.radio_60 = QRadioButton("50%（60fps）")
-        self.radio_120 = QRadioButton("75%（120fps）")
-        self.radio_240 = QRadioButton("87.5%（240fps）")
+        options_frame.setObjectName("panel")
+        options_layout = QVBoxLayout(options_frame)
+        options_layout.setSpacing(10)
+        options_layout.setContentsMargins(16, 14, 16, 16)
+        options_title = QLabel("处理选项")
+        options_title.setObjectName("panel_title")
+        options_layout.addWidget(options_title)
+
+        fps_row = QHBoxLayout()
+        fps_row.setSpacing(16)
+        fps_label = QLabel("处理强度")
+        fps_label.setObjectName("field_label")
+        fps_row.addWidget(fps_label)
+        self.radio_60 = QRadioButton("50% · 60fps")
+        self.radio_120 = QRadioButton("75% · 120fps")
+        self.radio_240 = QRadioButton("87.5% · 240fps")
         self.radio_60.setChecked(True)
         fps_button_group = QButtonGroup(self)
         fps_button_group.addButton(self.radio_60)
         fps_button_group.addButton(self.radio_120)
         fps_button_group.addButton(self.radio_240)
-        fps_options_layout = QHBoxLayout()
-        fps_options_layout.addWidget(self.radio_60)
-        fps_options_layout.addWidget(self.radio_120)
-        fps_options_layout.addWidget(self.radio_240)
-        fps_options_layout.addStretch()
-        options_layout.addLayout(fps_options_layout)
-        options_frame.setLayout(options_layout)
-        main_layout.addWidget(options_frame)
-        main_layout.addWidget(self._build_post_section())
-        gpu_title = QLabel("性能选项")
-        options_layout.addWidget(gpu_title)
-        self.gpu_checkbox = QCheckBox("启用GPU加速（需要NVIDIA显卡和驱动）")
+        fps_row.addWidget(self.radio_60)
+        fps_row.addWidget(self.radio_120)
+        fps_row.addWidget(self.radio_240)
+        fps_row.addStretch()
+        options_layout.addLayout(fps_row)
+
+        options_layout.addWidget(self._build_post_section())
+
+        self.gpu_checkbox = QCheckBox("启用 GPU 加速（需要 NVIDIA 显卡和驱动）")
         self.gpu_checkbox.setChecked(False)
         options_layout.addWidget(self.gpu_checkbox)
-        telemetry_title = QLabel("隐私与统计")
-        telemetry_title.setObjectName("section_title")
-        options_layout.addWidget(telemetry_title)
         self.telemetry_checkbox = QCheckBox("启用匿名使用统计（不收集视频内容与文件路径）")
         self.telemetry_checkbox.setChecked(False)
         self.telemetry_checkbox.toggled.connect(self.on_telemetry_toggled)
         options_layout.addWidget(self.telemetry_checkbox)
-        options_frame.setLayout(options_layout)
         main_layout.addWidget(options_frame)
-        self.btn_run = QPushButton("运行")
+
+        # ---------- 运行按钮 ----------
+        self.btn_run = QPushButton("开始处理")
         self.btn_run.setObjectName("run_button")
-        self.btn_run.setMinimumWidth(200)
         self.btn_run.clicked.connect(self.run_processing)
         self.btn_run.setEnabled(False)
         main_layout.addWidget(self.btn_run, alignment=Qt.AlignCenter)
-        progress_log_frame = QFrame()
-        progress_log_layout = QVBoxLayout()
-        progress_log_layout.setSpacing(10)
+
+        # ---------- 任务状态面板 ----------
+        status_panel = QFrame()
+        status_panel.setObjectName("panel")
+        status_layout = QVBoxLayout(status_panel)
+        status_layout.setSpacing(10)
+        status_layout.setContentsMargins(16, 14, 16, 16)
+        status_title = QLabel("任务状态")
+        status_title.setObjectName("panel_title")
+        status_layout.addWidget(status_title)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        progress_log_layout.addWidget(self.progress_bar)
+        status_layout.addWidget(self.progress_bar)
+        self.status_label = QLabel("待开始")
+        self.status_label.setObjectName("status_ready")
+        status_layout.addWidget(self.status_label)
         self.text_output = QTextEdit()
+        self.text_output.setObjectName("log_view")
         self.text_output.setReadOnly(True)
-        progress_log_layout.addWidget(self.text_output)
-        progress_log_frame.setLayout(progress_log_layout)
-        main_layout.addWidget(progress_log_frame)
+        self.text_output.setMinimumHeight(140)
+        status_layout.addWidget(self.text_output)
+        main_layout.addWidget(status_panel)
         content.setLayout(main_layout)
         self.video_a_path = ""
         self.video_b_path = ""
@@ -356,20 +343,24 @@ class MainWindow(QMainWindow):
         if not os.path.exists(self.temp_dir):
             os.makedirs(self.temp_dir)
 
+    def _file_row(self, name, hint, path_label, btn):
+        """素材/输出文件选择行：左侧字段名（悬停显示说明），右侧路径与浏览按钮。"""
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        label = QLabel(name)
+        label.setObjectName("field_label")
+        label.setToolTip(hint)
+        row.addWidget(label)
+        row.addWidget(path_label, 1)
+        row.addWidget(btn)
+        return row
+
     def _build_post_section(self):
-        """构建后期处理配置面板：两个标签页（画面与音频 / 包装）。"""
-        frame = QFrame()
-        layout = QVBoxLayout(frame)
-        layout.setSpacing(8)
-        title = QLabel("后期处理")
-        title.setObjectName("section_title")
-        layout.addWidget(title)
+        """后期处理配置面板：两个标签页（画面与音频 / 包装）。"""
         tabs = QTabWidget()
         tabs.addTab(self._build_visual_tab(), "画面与音频")
         tabs.addTab(self._build_branding_tab(), "包装")
-        layout.addWidget(tabs)
-        frame.setLayout(layout)
-        return frame
+        return tabs
 
     def _build_visual_tab(self):
         """画面效果与音频配置页。"""
@@ -446,7 +437,6 @@ class MainWindow(QMainWindow):
         self.audio_mode_combo.addItems(["BGM 替换原声", "原声 + BGM 混音", "配音替换原声"])
         self.audio_mode_combo.setEnabled(False)
         self.btn_audio_file = QPushButton("选择音频")
-        self.btn_audio_file.setObjectName("select_button")
         self.btn_audio_file.setEnabled(False)
         self.btn_audio_file.clicked.connect(self.select_audio_file)
         self.audio_volume_spin = self._spin(30.0, 0.0, 100.0, 5.0, "%")
@@ -466,7 +456,7 @@ class MainWindow(QMainWindow):
 
         rows.setLayout(rows_layout)
         scroll.setWidget(rows)
-        scroll.setFixedHeight(260)
+        scroll.setMinimumHeight(230)
         return scroll
 
     def _build_branding_tab(self):
@@ -482,7 +472,6 @@ class MainWindow(QMainWindow):
         # 字幕条
         self.caption_check, caption_row = self._row_start("④ 字幕条")
         self.btn_caption_srt = QPushButton("SRT")
-        self.btn_caption_srt.setObjectName("select_button")
         self.btn_caption_srt.clicked.connect(self.select_caption_srt)
         self.label_caption_srt = QLabel("多行文本模式")
         self.label_caption_srt.setObjectName("path_label")
@@ -490,7 +479,6 @@ class MainWindow(QMainWindow):
         caption_row.addWidget(self.label_caption_srt, 1)
         self._row_end(rows_layout, caption_row)
         self.caption_edit = QTextEdit()
-        self.caption_edit.setObjectName("caption_edit")
         self.caption_edit.setPlaceholderText("字幕文本，每行一条，均分内容时长")
         self.caption_edit.setFixedHeight(52)
         rows_layout.addWidget(self.caption_edit)
@@ -530,7 +518,7 @@ class MainWindow(QMainWindow):
 
         rows.setLayout(rows_layout)
         scroll.setWidget(rows)
-        scroll.setFixedHeight(260)
+        scroll.setMinimumHeight(230)
         return scroll
 
     def select_caption_srt(self):
@@ -690,18 +678,19 @@ class MainWindow(QMainWindow):
         self.progress_bar.setStyleSheet("")
         self.text_output.clear()
         if use_gpu:
-            self.append_text("已启用GPU加速模式。")
+            self.append_text("已启用 GPU 加速模式。")
         else:
-            self.append_text("使用CPU模式处理。")
+            self.append_text("使用 CPU 模式处理。")
+        self._set_status("处理中", "status_ready")
         task_id = str(uuid.uuid4())
         options = self.build_options()
         if options.audio_mode != "original":
             if not options.audio_file:
-                self.text_output.append("❌ 请先选择 BGM / 配音音频文件")
+                self.append_text("[错误] 请先选择 BGM / 配音音频文件")
                 self._reset_after_validation_error()
                 return
             if not os.path.exists(options.audio_file):
-                self.text_output.append(f"❌ 音频文件不存在: {options.audio_file}")
+                self.append_text(f"[错误] 音频文件不存在: {options.audio_file}")
                 self._reset_after_validation_error()
                 return
         self.telemetry.track(telemetry_events.EVENT_TASK_STARTED, {
@@ -720,7 +709,8 @@ class MainWindow(QMainWindow):
         self.processor.start()
 
     def _reset_after_validation_error(self):
-        self.progress_bar.setStyleSheet("QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e74c3c, stop:1 #c0392b); border-radius: 5px; }")
+        self.progress_bar.setStyleSheet("QProgressBar::chunk { background-color: #f97066; border-radius: 6px; }")
+        self._set_status("校验失败", "status_error")
         self.set_controls_enabled(True)
 
     def set_controls_enabled(self, enabled):
@@ -757,12 +747,20 @@ class MainWindow(QMainWindow):
 
     def processing_finished(self):
         self.set_controls_enabled(True)
-        self.append_text("处理完成！")
+        self._set_status("处理完成", "status_done")
+        self.append_text("处理完成")
 
     def show_error(self, message):
         self.set_controls_enabled(True)
-        self.text_output.append(f"❌ {message}")
-        self.progress_bar.setStyleSheet("QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e74c3c, stop:1 #c0392b); border-radius: 5px; }")
+        self._set_status("处理失败", "status_error")
+        self.append_text(f"[错误] {message}")
+        self.progress_bar.setStyleSheet("QProgressBar::chunk { background-color: #f97066; border-radius: 6px; }")
+
+    def _set_status(self, text, object_name):
+        self.status_label.setText(text)
+        self.status_label.setObjectName(object_name)
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
 
     def closeEvent(self, event):
         import shutil
