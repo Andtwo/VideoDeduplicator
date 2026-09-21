@@ -162,6 +162,23 @@ QScrollArea {
     border: none;
     background: transparent;
 }
+QScrollBar:vertical {
+    background: #2a2a3a;
+    width: 10px;
+    margin: 0px;
+}
+QScrollBar::handle:vertical {
+    background: #4a90e2;
+    border-radius: 5px;
+    min-height: 30px;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+    background: none;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
 QTabWidget::pane {
     border: 1px solid #444;
     border-radius: 4px;
@@ -204,7 +221,8 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(":/logo.png"))
         except:
             print("图标资源 :logo.png 未找到，请检查resources.qrc和resources.py文件。")
-        self.setGeometry(100, 100, 600, 950)
+        self.resize(640, 780)
+        self.setMinimumSize(560, 500)
         self.init_ui()
         sys.excepthook = self.except_hook
         self.telemetry_config = TelemetryConfig()
@@ -215,11 +233,16 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._init_telemetry_consent)
 
     def init_ui(self):
-        container = QWidget()
-        self.setCentralWidget(container)
-        main_layout = QVBoxLayout()
-        main_layout.setSpacing(20)
-        main_layout.setContentsMargins(20, 20, 20, 20)
+        # 主内容放入滚动区，窗口高度不足时可滚动，内容区域可自由压缩
+        content = QWidget()
+        main_layout = QVBoxLayout(content)
+        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setWidget(content)
+        self.setCentralWidget(scroll_area)
         video_a_frame = QFrame()
         video_a_layout = QHBoxLayout()
         video_a_layout.setSpacing(10)
@@ -323,7 +346,7 @@ class MainWindow(QMainWindow):
         progress_log_layout.addWidget(self.text_output)
         progress_log_frame.setLayout(progress_log_layout)
         main_layout.addWidget(progress_log_frame)
-        container.setLayout(main_layout)
+        content.setLayout(main_layout)
         self.video_a_path = ""
         self.video_b_path = ""
         self.output_path = ""
