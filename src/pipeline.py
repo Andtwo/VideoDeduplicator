@@ -45,7 +45,8 @@ def get_a_positions(fps, N_a):
             positions.add(next_pos)
         return positions
     else:
-        raise ValueError("不支持的帧率！")
+        # 无素材混合时按内容视频原帧率输出
+        return set(range(N_a))
 
 
 def run_ffmpeg(cmd_list, log_path=None):
@@ -106,17 +107,21 @@ class VideoProcessor(QThread):
             self.progress.emit(5)
             width_a, height_a, fps_a, duration_a, total_frames_a = get_video_info(self.video_a_path)
             self.status.emit(f"视频A信息: {width_a}x{height_a}, {fps_a:.2f}fps, {duration_a:.2f}s, {total_frames_a}帧")
-            width_b, height_b, _, _, _ = get_video_info(self.video_b_path)
-            self.status.emit(f"视频B信息: {width_b}x{height_b}")
+            has_b = bool(self.video_b_path)
+            if has_b:
+                width_b, height_b, _, _, _ = get_video_info(self.video_b_path)
+                self.status.emit(f"视频B信息: {width_b}x{height_b}")
+                if (width_a, height_a) != (width_b, height_b):
+                    self.status.emit(f"分辨率不一致，将视频B ({width_b}x{height_b}) 调整为视频A的尺寸 ({width_a}x{height_a})... (t={time.time() - start_time:.2f}s)")
+                    resize_video(self.video_b_path, temp_b_path, width_a, height_a, self.use_gpu)
+                    path_b_to_process = temp_b_path
+                    temp_files_to_clean.append(temp_b_path)
+                else:
+                    self.status.emit("分辨率一致，跳过尺寸调整。")
+            else:
+                self.status.emit("未选择素材视频，跳过帧混合，仅应用后期效果。")
             if not duration_a or duration_a <= 0:
                 raise ValueError("无法获取视频A的有效时长，处理中止。")
-            if (width_a, height_a) != (width_b, height_b):
-                self.status.emit(f"分辨率不一致，将视频B ({width_b}x{height_b}) 调整为视频A的尺寸 ({width_a}x{height_a})... (t={time.time() - start_time:.2f}s)")
-                resize_video(self.video_b_path, temp_b_path, width_a, height_a, self.use_gpu)
-                path_b_to_process = temp_b_path
-                temp_files_to_clean.append(temp_b_path)
-            else:
-                self.status.emit("分辨率一致，跳过尺寸调整。")
             self.progress.emit(10)
 
             # 确定本条视频的随机参数（任务内保持一致）
@@ -162,7 +167,7 @@ class VideoProcessor(QThread):
                 stderr=writer_stderr,
                 creationflags=creation_flags
             )
-            self.status.emit(f"开始混合帧... (t={time.time() - start_time:.2f}s)")
+            self.status.emit(("开始混合帧..." if has_b else "开始逐帧处理...") + f" (t={time.time() - start_time:.2f}s)")
             self.progress.emit(20)
             # 片头帧直接写入编码管道（与主视频同参数，无需 concat）
             if intro_n:
@@ -174,8 +179,12 @@ class VideoProcessor(QThread):
                     writer_process.stdin.write(frame.tobytes())
             try:
                 reader_a_gen = frame_reader(self.video_a_path, width_a, height_a)
-                reader_b_gen = frame_reader(path_b_to_process, width_a, height_a)
-                reader_b_cycled = itertools.cycle(reader_b_gen)
+                if has_b:
+                    reader_b_gen = frame_reader(path_b_to_process, width_a, height_a)
+                    reader_b_cycled = itertools.cycle(reader_b_gen)
+                else:
+                    reader_b_gen = None
+                    reader_b_cycled = None
                 a_frame_counter = 0
                 last_j = -1
                 written_frames = 0
@@ -186,8 +195,11 @@ class VideoProcessor(QThread):
                         if i in positions_a and a_frame_counter < total_frames_a:
                             frame_to_write = next(reader_a_gen)
                             a_frame_counter += 1
-                        else:
+                        elif reader_b_cycled is not None:
                             frame_to_write = next(reader_b_cycled)
+                        else:
+                            # 无素材混合：直接按序读取内容视频帧
+                            frame_to_write = next(reader_a_gen)
                         # 变速筛选：输出帧 j = floor(i / speed)，j 前进才写入
                         if speed > 1.001:
                             j = int(i / speed)
@@ -212,7 +224,7 @@ class VideoProcessor(QThread):
             finally:
                 if reader_a_gen:
                     reader_a_gen.close()
-                if reader_b_gen:
+                if reader_b_gen is not None:
                     reader_b_gen.close()
             # 片尾帧
             if outro_n:

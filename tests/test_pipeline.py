@@ -13,6 +13,16 @@ def make_processor(qapp, video_a, video_b, out_path, tmp_dir, options):
 
 
 class TestBasicPipeline:
+    def test_no_video_b_passthrough(self, qapp, wait_process, video_a, tmp_path):
+        """不选素材视频：跳过帧混合，仅按原帧率输出内容视频。"""
+        out = tmp_path / "no_b.mp4"
+        p = VideoProcessor(video_a, "", str(out), 30, str(tmp_path / "tmp"),
+                           options=ProcessingOptions())
+        wait_process(p)
+        info = probe(out)
+        assert info["duration"] == pytest.approx(4.0, abs=0.2)
+        assert "video" in info["streams"] and "audio" in info["streams"]
+
     def test_no_effects_passthrough(self, qapp, wait_process, video_a, video_b, tmp_path):
         out = tmp_path / "plain.mp4"
         p = make_processor(qapp, video_a, video_b, out, tmp_path / "tmp", ProcessingOptions())

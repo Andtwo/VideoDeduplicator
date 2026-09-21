@@ -204,7 +204,7 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AB Video Processor")
+        self.setWindowTitle("VideoDeduplicator")
         try:
             self.setWindowIcon(QIcon(":/logo.png"))
         except:
@@ -247,21 +247,21 @@ class MainWindow(QMainWindow):
         self.label_a.setWordWrap(True)
         self.btn_a = QPushButton("浏览")
         self.btn_a.clicked.connect(self.select_video_a)
-        inputs_layout.addLayout(self._file_row("视频 A", "内容视频", self.label_a, self.btn_a))
+        inputs_layout.addLayout(self._file_row("内容视频", "视频 A · 主体内容，必填", self.label_a, self.btn_a))
 
         self.label_b = QLabel("未选择")
         self.label_b.setObjectName("path_label")
         self.label_b.setWordWrap(True)
         self.btn_b = QPushButton("浏览")
         self.btn_b.clicked.connect(self.select_video_b)
-        inputs_layout.addLayout(self._file_row("视频 B", "填充素材", self.label_b, self.btn_b))
+        inputs_layout.addLayout(self._file_row("素材视频", "视频 B · 填充素材，可选", self.label_b, self.btn_b))
 
         self.label_output = QLabel("未选择")
         self.label_output.setObjectName("path_label")
         self.label_output.setWordWrap(True)
         self.btn_output = QPushButton("浏览")
         self.btn_output.clicked.connect(self.select_output_path)
-        inputs_layout.addLayout(self._file_row("输出", "保存为 .mp4", self.label_output, self.btn_output))
+        inputs_layout.addLayout(self._file_row("输出路径", "保存为 .mp4", self.label_output, self.btn_output))
         main_layout.addWidget(inputs_panel)
 
         # ---------- 处理选项面板 ----------
@@ -292,6 +292,9 @@ class MainWindow(QMainWindow):
         fps_row.addWidget(self.radio_240)
         fps_row.addStretch()
         options_layout.addLayout(fps_row)
+        self.fps_hint = QLabel("混合素材帧需要选择处理强度")
+        self.fps_hint.setObjectName("param_label")
+        options_layout.addWidget(self.fps_hint)
 
         options_layout.addWidget(self._build_post_section())
 
@@ -608,18 +611,21 @@ class MainWindow(QMainWindow):
         )
 
     def select_video_a(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择视频A", "", "视频文件 (*.mp4 *.avi *.mov)")
+        path, _ = QFileDialog.getOpenFileName(self, "选择内容视频（视频 A）", "", "视频文件 (*.mp4 *.avi *.mov)")
         if path:
             self.video_a_path = path
             self.label_a.setText(path)
             self.check_run_enable()
 
     def select_video_b(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择视频B", "", "视频文件 (*.mp4 *.avi *.mov)")
+        path, _ = QFileDialog.getOpenFileName(self, "选择素材视频（视频 B，可选）", "", "视频文件 (*.mp4 *.avi *.mov)")
         if path:
             self.video_b_path = path
             self.label_b.setText(path)
-            self.check_run_enable()
+        else:
+            self.video_b_path = ""
+            self.label_b.setText("未选择")
+        self.check_run_enable()
 
     def select_output_path(self):
         path, _ = QFileDialog.getSaveFileName(self, "选择输出路径", "C.mp4", "视频文件 (*.mp4)")
@@ -629,10 +635,19 @@ class MainWindow(QMainWindow):
             self.check_run_enable()
 
     def check_run_enable(self):
-        if self.video_a_path and self.video_b_path and self.output_path:
-            self.btn_run.setEnabled(True)
-        else:
-            self.btn_run.setEnabled(False)
+        """运行按钮与处理强度的联动：
+        - 内容视频 A + 输出路径为必填；
+        - 素材视频 B 可选：选了 B 时必须选择混合强度；不选 B 则只做后期效果处理。
+        """
+        has_a = bool(self.video_a_path)
+        has_b = bool(self.video_b_path)
+        has_out = bool(self.output_path)
+        mix_enabled = has_b
+        for radio in (self.radio_60, self.radio_120, self.radio_240):
+            radio.setEnabled(mix_enabled)
+        if hasattr(self, 'fps_hint'):
+            self.fps_hint.setVisible(not mix_enabled)
+        self.btn_run.setEnabled(has_a and has_out)
 
     def _init_telemetry_consent(self):
         """首次启动弹出统计说明，用户选择前不上报任何事件。"""
@@ -666,7 +681,10 @@ class MainWindow(QMainWindow):
             pass
 
     def run_processing(self):
-        if self.radio_60.isChecked():
+        if not self.video_b_path:
+            # 无素材视频：不做帧混合，仅按内容视频原帧率输出（30fps）
+            fps = 30
+        elif self.radio_60.isChecked():
             fps = 60
         elif self.radio_120.isChecked():
             fps = 120
@@ -717,11 +735,12 @@ class MainWindow(QMainWindow):
         self.btn_a.setEnabled(enabled)
         self.btn_b.setEnabled(enabled)
         self.btn_output.setEnabled(enabled)
-        is_ready = bool(enabled and self.video_a_path and self.video_b_path and self.output_path)
+        is_ready = bool(enabled and self.video_a_path and self.output_path)
         self.btn_run.setEnabled(is_ready)
-        self.radio_60.setEnabled(enabled)
-        self.radio_120.setEnabled(enabled)
-        self.radio_240.setEnabled(enabled)
+        mix_enabled = enabled and bool(self.video_b_path)
+        self.radio_60.setEnabled(mix_enabled)
+        self.radio_120.setEnabled(mix_enabled)
+        self.radio_240.setEnabled(mix_enabled)
         self.gpu_checkbox.setEnabled(enabled)
         self.telemetry_checkbox.setEnabled(enabled)
         for w in (self.speed_check, self.speed_random_check, self.speed_min_spin, self.speed_max_spin,
@@ -776,7 +795,7 @@ class MainWindow(QMainWindow):
         error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
         if hasattr(self, 'text_output'):
             self.show_error(f"发生未捕获的异常：\n{error_msg}")
-            self.setWindowTitle("AB Video Processor - 发生严重错误")
+            self.setWindowTitle("VideoDeduplicator - 发生严重错误")
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
 
