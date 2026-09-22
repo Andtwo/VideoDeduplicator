@@ -1,6 +1,12 @@
+apikey.txt
+output/
+sample/
 __pycache__/
 *.pyc
+.DS_Store
 venv/
 telemetry-server/data/
 12433.jpg
 软件界面*.png
+uploads/
+web_outputs/

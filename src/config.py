@@ -60,6 +60,13 @@ class ProcessingOptions:
     outro_text: str = ""
     outro_duration: float = 1.0  # 秒
 
+    # Web 版扩展：删帧（模式 B：真实删除，视频变短）
+    drop_enabled: bool = False
+    drop_per_second: int = 0     # 每秒删除的帧数（1-3）
+
+    # Web 版扩展：OCR 提取的字幕条目（优先于 caption_text/caption_srt）
+    caption_ocr_entries: list = field(default_factory=list)
+
     def sample_randoms(self, rng):
         """任务开始时确定本条视频的随机参数，返回 dict。同一次任务内保持一致。"""
         speed = rng.uniform(self.speed_min, self.speed_max) if self.speed_enabled else 1.0
@@ -103,7 +110,10 @@ class ProcessingOptions:
         """返回字幕条目 [(start, end, text), ...]，时间轴为内容段输出时间。
 
         SRT 时间轴基于原视频，需除以 speed 换算；多行文本均分时长。
+        OCR 条目优先，时间轴已是输出时间。
         """
+        if self.caption_ocr_entries:
+            return self.caption_ocr_entries
         if self.caption_srt and os.path.exists(self.caption_srt):
             from assets import parse_srt
             entries = parse_srt(self.caption_srt)
