@@ -1,6 +1,8 @@
 """端到端管线测试：合成视频 -> VideoProcessor -> 输出校验。"""
 import os
+import subprocess
 
+import cv2
 import pytest
 
 from config import ProcessingOptions
@@ -13,6 +15,28 @@ def make_processor(qapp, video_a, video_b, out_path, tmp_dir, options):
 
 
 class TestBasicPipeline:
+    def test_mirror_flips_final_output_frame(self, qapp, wait_process, tmp_path):
+        src = tmp_path / "split.mp4"
+        subprocess.run([
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", "color=c=red:size=80x80:rate=30:duration=1",
+            "-f", "lavfi", "-i", "color=c=blue:size=80x80:rate=30:duration=1",
+            "-filter_complex", "[0:v][1:v]hstack=inputs=2[v]",
+            "-map", "[v]", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(src)
+        ], check=True, capture_output=True)
+        out = tmp_path / "mirrored.mp4"
+        p = VideoProcessor(str(src), "", str(out), 30, str(tmp_path / "tmp"),
+                           options=ProcessingOptions(mirror_enabled=True))
+        wait_process(p)
+        cap = cv2.VideoCapture(str(out))
+        ok, frame = cap.read()
+        cap.release()
+        assert ok
+        left = frame[:, :40].mean(axis=(0, 1))
+        right = frame[:, -40:].mean(axis=(0, 1))
+        assert left[0] > left[2] + 80   # BGR: 左侧应变成蓝色
+        assert right[2] > right[0] + 80  # 右侧应变成红色
+
     def test_no_video_b_passthrough(self, qapp, wait_process, video_a, tmp_path):
         """不选素材视频：跳过帧混合，仅按原帧率输出内容视频。"""
         out = tmp_path / "no_b.mp4"

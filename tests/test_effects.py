@@ -67,6 +67,13 @@ class TestPixelEffects:
             out = pipeline.apply(frame, idx)
             assert out.shape == (H, W, 3)
 
+    def test_pipeline_does_not_apply_mirror_before_overlays(self):
+        opts = ProcessingOptions(mirror_enabled=True)
+        pipeline = EffectPipeline(opts, np.random.default_rng(0), W, H,
+                                  fps=30, content_duration=4.0, speed=1.0)
+        frame = make_frame()
+        np.testing.assert_array_equal(pipeline.apply(frame, 0), frame)
+
 
 class TestBrandingOverlays:
     def test_caption_bar_shows_and_hides(self):
