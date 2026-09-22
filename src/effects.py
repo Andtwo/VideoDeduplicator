@@ -1,7 +1,7 @@
 """后期效果管线：像素级处理在帧循环中逐帧应用。
 
-处理顺序：几何（缩放）-> 色调（滤镜 -> 特效）-> 叠加（贴纸/字幕/花字）。
-水平镜像属于最终帧处理，在 pipeline.py 中所有叠加完成后统一执行。
+处理顺序：几何（缩放 -> 镜像）-> 色调（滤镜 -> 特效）-> 叠加（贴纸/字幕/花字）。
+镜像只作用于主视频画面；所有叠加层在镜像后绘制，保持正常方向与位置。
 静态叠加层（贴纸）在初始化时预合成，每帧仅做一次 alpha 混合。
 """
 
@@ -392,8 +392,8 @@ class ProgressBarOverlay:
 class EffectPipeline:
     """按配置组装效果并逐帧应用。apply 针对主内容段的输出帧（变速筛选后）。
 
-    顺序：ZoomCrop（几何）-> ColorFilter -> 特效 -> 贴纸/字幕/花字。
-    水平镜像在最终帧写入前统一执行，避免只翻转某个叠加层。
+    顺序：ZoomCrop（几何）-> Mirror -> ColorFilter -> 特效 -> 贴纸/字幕/花字。
+    镜像只处理主视频帧，后续叠加层保持正常阅读方向。
     """
 
     def __init__(self, options, rng, width, height, fps=60, content_duration=None, speed=1.0):
@@ -401,6 +401,8 @@ class EffectPipeline:
         self.filter_style = None
         self.zoom = None
         self.effects = []
+        if options.mirror_enabled:
+            self.effects.append(Mirror())
         if options.filter_enabled:
             fx = ColorFilter(options.filter_style, options.filter_strength, rng)
             self.filter_style = fx.style

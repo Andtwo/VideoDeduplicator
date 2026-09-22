@@ -21,7 +21,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from media import get_video_info, resize_video, has_audio_stream
 from frame_io import frame_reader
 from config import ProcessingOptions
-from effects import EffectPipeline, Mirror, ProgressBarOverlay
+from effects import EffectPipeline, ProgressBarOverlay
 from branding import intro_frames, outro_frames
 from telemetry import events as telemetry_events
 
@@ -133,7 +133,6 @@ class VideoProcessor(QThread):
                                               content_duration=content_duration,
                                               speed=speed)
             effect_pipeline.set_zoom(randoms["zoom"])
-            final_mirror = Mirror() if self.options.mirror_enabled else None
             self._report_params(effect_pipeline, speed, randoms["zoom"])
 
             total_frames_c = int(duration_a * self.fps)
@@ -177,7 +176,6 @@ class VideoProcessor(QThread):
                                                        self.options.intro_duration, self.options.intro_text, rng)):
                     if progress_overlay is not None:
                         frame = progress_overlay.apply(frame, k / max(1, total_final_frames - 1))
-                    frame = self._apply_final_frame_effects(frame, final_mirror)
                     writer_process.stdin.write(frame.tobytes())
             try:
                 reader_a_gen = frame_reader(self.video_a_path, width_a, height_a)
@@ -213,7 +211,6 @@ class VideoProcessor(QThread):
                         if progress_overlay is not None:
                             progress = global_j / max(1, total_final_frames - 1)
                             frame_to_write = progress_overlay.apply(frame_to_write, progress)
-                        frame_to_write = self._apply_final_frame_effects(frame_to_write, final_mirror)
                         writer_process.stdin.write(frame_to_write.tobytes())
                         written_frames += 1
                         global_j += 1
@@ -237,7 +234,6 @@ class VideoProcessor(QThread):
                                                        self.options.outro_duration, self.options.outro_text, rng)):
                     if progress_overlay is not None:
                         frame = progress_overlay.apply(frame, (outro_start + k) / max(1, total_final_frames - 1))
-                    frame = self._apply_final_frame_effects(frame, final_mirror)
                     writer_process.stdin.write(frame.tobytes())
             self.status.emit(f"混合完成，正在生成最终视频文件... (t={time.time() - start_time:.2f}s)")
             writer_process.stdin.close()
@@ -275,11 +271,6 @@ class VideoProcessor(QThread):
                         os.remove(f)
                     except OSError as e:
                         self.status.emit(f"无法删除临时文件 {f}: {e}")
-
-    def _apply_final_frame_effects(self, frame, final_mirror):
-        if final_mirror is not None:
-            return final_mirror.apply(frame, 0)
-        return frame
 
     def _report_params(self, effect_pipeline, speed, zoom):
         """日志输出本条视频实际采样的参数。"""
