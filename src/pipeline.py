@@ -250,6 +250,7 @@ class VideoProcessor(QThread):
             intro_ms = int(round(intro_n / self.fps * 1000))
             self._compose_audio(temp_output_path, self.output_path, speed, final_duration,
                                 intro_ms, os.path.join(self.temp_dir, "ffmpeg_audio.log"))
+            temp_files_to_clean.append(os.path.join(self.temp_dir, "temp_voice.wav"))
             self.progress.emit(100)
             self.status.emit(f"视频处理完成! (总耗时: {time.time() - start_time:.2f}s)")
             self._track_task_success(time.time() - start_time, width_a, height_a,
@@ -390,12 +391,24 @@ class VideoProcessor(QThread):
         else:
             # original：保留原声（变速 + 片头静音 + 尾部补齐）
             voice_graph, voice_label = voice_chain()
+            # 先将原声转成 PCM WAV，再在中间域编码 AAC。
+            # FFmpeg 8 对 AAC 首帧 priming 很敏感：如果直接从 AAC 输入解码并编码后再与视频 remux，
+            # 部分播放器/二次解码器会把 priming 样本计入波形，听感上表现为相位错乱。
+            temp_voice = os.path.join(self.temp_dir, "temp_voice.wav")
             run_ffmpeg([
                 'ffmpeg', '-y', '-i', self.video_a_path,
                 '-filter_complex', voice_graph,
                 '-map', voice_label, '-t', f'{total_duration:.3f}',
+                '-c:a', 'pcm_s16le', '-ar', '44100', temp_voice
+            ], audio_log_path)
+            run_ffmpeg([
+                'ffmpeg', '-y', '-i', temp_voice,
                 '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', temp_audio
             ], audio_log_path)
+            try:
+                os.remove(temp_voice)
+            except OSError:
+                pass
 
         # 不用 -shortest：amix 产出的音轨时长元数据可能为 N/A，
         # ffmpeg 7 下 copy 模式 -shortest 会直接产出空文件；改用 -t 对齐两流

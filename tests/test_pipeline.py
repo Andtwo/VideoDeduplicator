@@ -3,6 +3,7 @@ import os
 import subprocess
 
 import cv2
+import numpy as np
 import pytest
 
 from config import ProcessingOptions
@@ -36,6 +37,40 @@ class TestBasicPipeline:
         right = frame[:, -40:].mean(axis=(0, 1))
         assert left[0] > left[2] + 80   # BGR: 左侧应变成蓝色
         assert right[2] > right[0] + 80  # 右侧应变成红色
+
+    def test_original_audio_keeps_waveform_after_remux(self, qapp, wait_process,
+                                                        video_a, tmp_path):
+        """原声保留输出应与源音频在解码后保持高相关，避免 AAC remux 相位错位。"""
+        out = tmp_path / "original_audio.mp4"
+        p = VideoProcessor(video_a, "", str(out), 30, str(tmp_path / "tmp"),
+                           options=ProcessingOptions())
+        wait_process(p)
+
+        def wav(path, wav_path):
+            subprocess.run([
+                "ffmpeg", "-y", "-v", "error", "-i", str(path),
+                "-vn", "-ac", "1", "-ar", "8000", "-c:a", "pcm_s16le", str(wav_path)
+            ], check=True, capture_output=True)
+            return np.fromfile(wav_path, dtype=np.int16, offset=44).astype(np.float32)
+
+        src = wav(video_a, tmp_path / "src.wav")
+        got = wav(out, tmp_path / "out.wav")
+        best = 0.0
+        for shift in range(-40, 41):
+            if shift >= 0:
+                left = src[shift:]
+                right = got[:len(left)]
+            else:
+                right = got[-shift:]
+                left = src[:len(right)]
+            n = min(len(left), len(right))
+            if n < 1000:
+                continue
+            x = left[:n] - left[:n].mean()
+            y = right[:n] - right[:n].mean()
+            corr = float(np.dot(x, y) / (np.linalg.norm(x) * np.linalg.norm(y) + 1e-9))
+            best = max(best, corr)
+        assert best > 0.98
 
     def test_no_video_b_passthrough(self, qapp, wait_process, video_a, tmp_path):
         """不选素材视频：跳过帧混合，仅按原帧率输出内容视频。"""
