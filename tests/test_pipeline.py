@@ -8,7 +8,7 @@ import pytest
 
 from config import ProcessingOptions
 from pipeline import VideoProcessor
-from conftest import probe
+from conftest import _make_video, probe
 
 
 def make_processor(qapp, video_a, video_b, out_path, tmp_dir, options):
@@ -82,6 +82,39 @@ class TestBasicPipeline:
         assert info["duration"] == pytest.approx(4.0, abs=0.2)
         assert "video" in info["streams"] and "audio" in info["streams"]
 
+    @pytest.mark.parametrize("source_fps", [24, 60])
+    def test_no_video_b_resamples_full_source_timeline(self, qapp, wait_process,
+                                                        tmp_path, source_fps):
+        src = _make_video(tmp_path / f"source_{source_fps}.mp4", 160, 120, 2.0,
+                          fps=source_fps)
+        out = tmp_path / f"out_{source_fps}.mp4"
+        p = VideoProcessor(src, "", str(out), 30, str(tmp_path / f"tmp_{source_fps}"),
+                           options=ProcessingOptions())
+        wait_process(p)
+        assert probe(out)["duration"] == pytest.approx(2.0, abs=0.12)
+
+    def test_no_video_b_60fps_reaches_source_ending(self, qapp, wait_process, tmp_path):
+        src = tmp_path / "source_60_color.mp4"
+        subprocess.run([
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", "color=c=red:size=160x120:rate=60:duration=1",
+            "-f", "lavfi", "-i", "color=c=blue:size=160x120:rate=60:duration=1",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+            "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+            "-map", "[v]", "-map", "2:a", "-c:v", "libx264", "-c:a", "aac",
+            "-pix_fmt", "yuv420p", "-shortest", str(src),
+        ], check=True, capture_output=True)
+        out = tmp_path / "source_60_out.mp4"
+        p = VideoProcessor(str(src), "", str(out), 30, str(tmp_path / "tmp_60_color"),
+                           options=ProcessingOptions())
+        wait_process(p)
+        cap = cv2.VideoCapture(str(out))
+        cap.set(cv2.CAP_PROP_POS_MSEC, 1750)
+        ok, frame = cap.read()
+        cap.release()
+        assert ok
+        assert frame[..., 0].mean() > frame[..., 2].mean() + 80
+
     def test_no_effects_passthrough(self, qapp, wait_process, video_a, video_b, tmp_path):
         out = tmp_path / "plain.mp4"
         p = make_processor(qapp, video_a, video_b, out, tmp_path / "tmp", ProcessingOptions())
@@ -97,6 +130,26 @@ class TestBasicPipeline:
         p = make_processor(qapp, video_a, video_b, out, tmp_path / "tmp", opts)
         wait_process(p)
         assert probe(out)["duration"] == pytest.approx(4.0 / 1.2, abs=0.15)
+
+    def test_drop_frames_shortens_video_and_keeps_audio_synced(self, qapp, wait_process,
+                                                                 video_a, tmp_path):
+        out = tmp_path / "dropped.mp4"
+        opts = ProcessingOptions(drop_enabled=True, drop_per_second=3)
+        p = VideoProcessor(video_a, "", str(out), 30, str(tmp_path / "tmp"), options=opts)
+        wait_process(p)
+        info = probe(out)
+        assert info["duration"] == pytest.approx(3.6, abs=0.12)
+        assert "video" in info["streams"] and "audio" in info["streams"]
+
+    def test_drop_positions_are_distributed_per_second(self, qapp, video_a, tmp_path):
+        opts = ProcessingOptions(drop_enabled=True, drop_per_second=2)
+        p = VideoProcessor(video_a, "", str(tmp_path / "out.mp4"), 30,
+                           str(tmp_path / "tmp"), options=opts)
+        positions = p._sample_drop_positions(75, np.random.default_rng(1))
+        assert len(positions) == 6
+        assert sum(0 <= value < 30 for value in positions) == 2
+        assert sum(30 <= value < 60 for value in positions) == 2
+        assert sum(60 <= value < 75 for value in positions) == 2
 
     def test_visual_effects_combined(self, qapp, wait_process, video_a, video_b, tmp_path):
         out = tmp_path / "fx.mp4"
@@ -127,6 +180,16 @@ class TestAudioModes:
         p = make_processor(qapp, video_a, video_b, out, tmp_path / "tmp", opts)
         wait_process(p)
         assert probe(out)["duration"] == pytest.approx(5.0, abs=0.2)
+
+    def test_voice_change_keeps_audio_and_duration(self, qapp, wait_process,
+                                                    video_a, tmp_path):
+        out = tmp_path / "changed_voice.mp4"
+        opts = ProcessingOptions(audio_mode="voice_change")
+        p = VideoProcessor(video_a, "", str(out), 30, str(tmp_path / "tmp"), options=opts)
+        wait_process(p)
+        info = probe(out)
+        assert "audio" in info["streams"]
+        assert info["duration"] == pytest.approx(4.0, abs=0.2)
 
     def test_replace_voice(self, qapp, wait_process, video_a, video_b, bgm_file, tmp_path):
         out = tmp_path / "voice.mp4"
@@ -164,6 +227,16 @@ class TestEdgeCases:
         wait_process(p)
         info = probe(out)
         assert "audio" not in info["streams"]  # 纯视频输出
+
+    def test_no_audio_source_with_voice_change_falls_back_to_video(self, qapp, wait_process,
+                                                                    video_no_audio, tmp_path):
+        out = tmp_path / "silent_voice_change.mp4"
+        opts = ProcessingOptions(audio_mode="voice_change")
+        p = VideoProcessor(video_no_audio, "", str(out), 30, str(tmp_path / "tmp"), opts)
+        wait_process(p)
+        info = probe(out)
+        assert "audio" not in info["streams"]
+        assert info["duration"] == pytest.approx(3.0, abs=0.15)
 
     def test_no_audio_source_with_mix_bgm(self, qapp, wait_process, video_no_audio,
                                           video_b, bgm_file, tmp_path):

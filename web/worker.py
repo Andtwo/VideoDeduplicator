@@ -1,18 +1,16 @@
 """Web 处理任务执行器：复用 src/pipeline.py 核心，附加 Web 策略。"""
 import os
 import sys
-import traceback
 
 SRC = os.path.join(os.path.dirname(__file__), "..", "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-import numpy as np
 from config import ProcessingOptions
 from pipeline import VideoProcessor as QtVideoProcessor
-from overlays import TitleOverlay
-from strategy import generate_strategy
-from ocr_subs import extract_subtitles
+from web.overlays import TitleOverlay
+from web.strategy import generate_strategy
+from web.ocr_subs import extract_subtitles
 
 
 def run_job(job, on_status=None):
@@ -61,14 +59,14 @@ def run_job(job, on_status=None):
 
     # OCR 字幕（镜像后压条）
     if "caption_bar" in steps:
+        opts.caption_enabled = True
+        opts.caption_force_bar = True
         try:
             entries = extract_subtitles(job["video_a_path"])
-            if entries:
-                opts.caption_enabled = True
-                opts.caption_ocr_entries = entries
-                status(f"OCR 提取到 {len(entries)} 条字幕")
+            opts.caption_ocr_entries = entries
+            status(f"OCR 提取到 {len(entries)} 条字幕")
         except Exception as e:
-            status(f"OCR 失败，跳过字幕条: {e}")
+            status(f"OCR 失败，仅保留字幕遮挡条: {e}")
 
     title_overlay = TitleOverlay(title, 0, 0) if title else None
 
@@ -76,6 +74,10 @@ def run_job(job, on_status=None):
         job["video_a_path"], job["video_b_path"], job["output_path"],
         strategy["fps"], job["temp_dir"], opts, title_overlay, status)
     processor.run()
+    if processor.failure:
+        raise RuntimeError(processor.failure)
+    if not os.path.isfile(job["output_path"]):
+        raise RuntimeError("处理完成但未生成输出文件")
     return job["output_path"]
 
 
@@ -96,14 +98,20 @@ class WebVideoProcessor(QtVideoProcessor):
         self.task_id = None
         self._title_overlay = title_overlay
         self._status_cb = status_cb
+        self.failure = ""
 
         class _Sig:
-            def emit(self, *a, **k):
-                pass
+            def __init__(self, callback=None):
+                self.callback = callback
+
+            def emit(self, *args, **kwargs):
+                if self.callback:
+                    self.callback(*args, **kwargs)
+
         self.progress = _Sig()
         self.status = _Sig()
         self.finished = _Sig()
-        self.error = _Sig()
+        self.error = _Sig(self._record_failure)
 
     def run(self):
         orig_emit = self.status.emit
@@ -113,7 +121,10 @@ class WebVideoProcessor(QtVideoProcessor):
         finally:
             self.status.emit = orig_emit
 
-    def _apply_title(self, frame):
+    def _record_failure(self, message):
+        self.failure = message
+
+    def _postprocess_frame(self, frame):
         if self._title_overlay and self._title_overlay.enabled:
             if self._title_overlay.w == 0:
                 h, w = frame.shape[:2]

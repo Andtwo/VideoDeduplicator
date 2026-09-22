@@ -11,7 +11,6 @@
 import os
 import sys
 import time
-import itertools
 import subprocess
 
 import numpy as np
@@ -19,7 +18,7 @@ import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from media import get_video_info, resize_video, has_audio_stream
-from frame_io import frame_reader
+from frame_io import frame_reader, looping_frame_reader, resampled_frame_reader
 from config import ProcessingOptions
 from effects import EffectPipeline, ProgressBarOverlay
 from branding import intro_frames, outro_frames
@@ -128,26 +127,30 @@ class VideoProcessor(QThread):
             randoms = self.options.sample_randoms(rng)
             speed = randoms["speed"]
             content_duration = duration_a / speed
+            total_frames_c = int(round(duration_a * self.fps))
+            total_out_frames = int(round(total_frames_c / speed))
+            drop_positions = self._sample_drop_positions(total_out_frames, rng)
+            kept_content_frames = total_out_frames - len(drop_positions)
+            self.options.caption_time_map = self._build_caption_time_map(
+                total_out_frames, drop_positions, speed)
             effect_pipeline = EffectPipeline(self.options, rng, width_a, height_a,
                                               fps=self.fps,
-                                              content_duration=content_duration,
+                                              content_duration=kept_content_frames / self.fps,
                                               speed=speed)
             effect_pipeline.set_zoom(randoms["zoom"])
             self._report_params(effect_pipeline, speed, randoms["zoom"])
-
-            total_frames_c = int(duration_a * self.fps)
-            total_out_frames = int(round(total_frames_c / speed))
             intro_n = int(round(self.options.intro_duration * self.fps)) if self.options.intro_enabled else 0
             outro_n = int(round(self.options.outro_duration * self.fps)) if self.options.outro_enabled else 0
             progress_overlay = (ProgressBarOverlay(width_a, height_a)
                                 if self.options.progress_enabled else None)
-            total_final_frames = intro_n + total_out_frames + outro_n
+            total_final_frames = intro_n + kept_content_frames + outro_n
             total_final_duration = total_final_frames / self.fps
-            self.status.emit(f"目标视频C: {self.fps}fps, 总帧数: {total_frames_c} -> 输出 {total_out_frames} 帧"
+            drop_summary = f", 删帧 {len(drop_positions)} 帧" if drop_positions else ""
+            self.status.emit(f"目标视频C: {self.fps}fps, 总帧数: {total_frames_c} -> 输出 {kept_content_frames} 帧{drop_summary}"
                              + (f" (含片头 {intro_n} + 片尾 {outro_n} 帧, 总时长 {total_final_duration:.2f}s)"
-                                if intro_n or outro_n else f" (时长 {total_out_frames / self.fps:.2f}s)"))
+                                if intro_n or outro_n else f" (时长 {kept_content_frames / self.fps:.2f}s)"))
             self.status.emit(f"准备帧序列混合... (t={time.time() - start_time:.2f}s)")
-            positions_a = get_a_positions(self.fps, total_frames_a)
+            positions_a = get_a_positions(self.fps, total_frames_a) if has_b else set(range(total_frames_c))
             encoder = 'h264_nvenc' if self.use_gpu else 'libx264'
             quality_param = '-preset p6' if self.use_gpu else '-crf 23'
             writer_cmd = [
@@ -176,18 +179,23 @@ class VideoProcessor(QThread):
                                                        self.options.intro_duration, self.options.intro_text, rng)):
                     if progress_overlay is not None:
                         frame = progress_overlay.apply(frame, k / max(1, total_final_frames - 1))
+                    frame = self._postprocess_frame(frame)
                     writer_process.stdin.write(frame.tobytes())
             try:
-                reader_a_gen = frame_reader(self.video_a_path, width_a, height_a)
                 if has_b:
-                    reader_b_gen = frame_reader(path_b_to_process, width_a, height_a)
-                    reader_b_cycled = itertools.cycle(reader_b_gen)
+                    reader_a_gen = frame_reader(self.video_a_path, width_a, height_a)
+                else:
+                    reader_a_gen = resampled_frame_reader(
+                        self.video_a_path, width_a, height_a,
+                        fps_a, self.fps, total_frames_c)
+                if has_b:
+                    reader_b_gen = looping_frame_reader(path_b_to_process, width_a, height_a)
                 else:
                     reader_b_gen = None
-                    reader_b_cycled = None
                 a_frame_counter = 0
                 last_j = -1
                 written_frames = 0
+                candidate_frame = 0
                 global_j = float(intro_n)
                 for i in range(total_frames_c):
                     frame_to_write = None
@@ -195,8 +203,8 @@ class VideoProcessor(QThread):
                         if i in positions_a and a_frame_counter < total_frames_a:
                             frame_to_write = next(reader_a_gen)
                             a_frame_counter += 1
-                        elif reader_b_cycled is not None:
-                            frame_to_write = next(reader_b_cycled)
+                        elif reader_b_gen is not None:
+                            frame_to_write = next(reader_b_gen)
                         else:
                             # 无素材混合：直接按序读取内容视频帧
                             frame_to_write = next(reader_a_gen)
@@ -206,11 +214,16 @@ class VideoProcessor(QThread):
                             if j <= last_j:
                                 continue
                             last_j = j
+                        current_candidate = candidate_frame
+                        candidate_frame += 1
+                        if current_candidate in drop_positions:
+                            continue
                         if not effect_pipeline.is_identity:
                             frame_to_write = effect_pipeline.apply(frame_to_write, written_frames)
                         if progress_overlay is not None:
                             progress = global_j / max(1, total_final_frames - 1)
                             frame_to_write = progress_overlay.apply(frame_to_write, progress)
+                        frame_to_write = self._postprocess_frame(frame_to_write)
                         writer_process.stdin.write(frame_to_write.tobytes())
                         written_frames += 1
                         global_j += 1
@@ -234,6 +247,7 @@ class VideoProcessor(QThread):
                                                        self.options.outro_duration, self.options.outro_text, rng)):
                     if progress_overlay is not None:
                         frame = progress_overlay.apply(frame, (outro_start + k) / max(1, total_final_frames - 1))
+                    frame = self._postprocess_frame(frame)
                     writer_process.stdin.write(frame.tobytes())
             self.status.emit(f"混合完成，正在生成最终视频文件... (t={time.time() - start_time:.2f}s)")
             writer_process.stdin.close()
@@ -248,7 +262,9 @@ class VideoProcessor(QThread):
             self.status.emit(f"处理音轨... (t={time.time() - start_time:.2f}s)")
             final_duration = (intro_n + written_frames + outro_n) / self.fps
             intro_ms = int(round(intro_n / self.fps * 1000))
-            self._compose_audio(temp_output_path, self.output_path, speed, final_duration,
+            keep_ratio = written_frames / max(1, candidate_frame)
+            audio_speed = speed / max(keep_ratio, 1e-6)
+            self._compose_audio(temp_output_path, self.output_path, audio_speed, final_duration,
                                 intro_ms, os.path.join(self.temp_dir, "ffmpeg_audio.log"))
             temp_files_to_clean.append(os.path.join(self.temp_dir, "temp_voice.wav"))
             self.progress.emit(100)
@@ -273,6 +289,35 @@ class VideoProcessor(QThread):
                     except OSError as e:
                         self.status.emit(f"无法删除临时文件 {f}: {e}")
 
+    def _sample_drop_positions(self, frame_count, rng):
+        """按输出时间轴每秒随机选择要真实删除的帧。"""
+        if not self.options.drop_enabled or self.options.drop_per_second <= 0:
+            return set()
+        positions = set()
+        for start in range(0, frame_count, self.fps):
+            end = min(start + self.fps, frame_count)
+            count = min(self.options.drop_per_second, max(0, end - start - 1))
+            if count:
+                picks = rng.choice(np.arange(start, end), size=count, replace=False)
+                positions.update(int(value) for value in picks)
+        return positions
+
+    def _build_caption_time_map(self, frame_count, drop_positions, speed):
+        """构建输出时间到原视频时间的映射，供 OCR 字幕同步使用。"""
+        mapping = []
+        output_index = 0
+        for candidate in range(frame_count):
+            if candidate in drop_positions:
+                continue
+            source_time = candidate * speed / self.fps
+            mapping.append((output_index / self.fps, source_time))
+            output_index += 1
+        return mapping
+
+    def _postprocess_frame(self, frame):
+        """供 Web 等前端添加最终叠加层；桌面处理默认保持原帧。"""
+        return frame
+
     def _report_params(self, effect_pipeline, speed, zoom):
         """日志输出本条视频实际采样的参数。"""
         parts = []
@@ -294,6 +339,8 @@ class VideoProcessor(QThread):
             parts.append("花字")
         if self.options.progress_enabled:
             parts.append("进度条")
+        if self.options.drop_enabled:
+            parts.append(f"每秒删帧 {self.options.drop_per_second}")
         if self.options.intro_enabled:
             parts.append(f"片头{self.options.intro_duration:.1f}s")
         if self.options.outro_enabled:
@@ -304,6 +351,8 @@ class VideoProcessor(QThread):
             parts.append("BGM混音")
         elif self.options.audio_mode == "replace_voice":
             parts.append("配音替换")
+        elif self.options.audio_mode == "voice_change":
+            parts.append("简单变声")
         if parts:
             self.status.emit("后期参数: " + ", ".join(parts))
         else:
@@ -324,8 +373,13 @@ class VideoProcessor(QThread):
         # 片头静音改用 aevalsrc 静音源 + concat 滤镜实现
         def voice_chain():
             parts = ["aformat=channel_layouts=stereo", "aresample=44100"]
-            if speed > 1.001:
-                parts.append(f"atempo={speed:.4f}")
+            tempo = speed
+            if mode == "voice_change":
+                pitch = 1.08
+                parts.extend([f"asetrate={int(44100 * pitch)}", "aresample=44100"])
+                tempo /= pitch
+            if abs(tempo - 1.0) > 0.001:
+                parts.append(f"atempo={tempo:.4f}")
             if intro_ms > 0:
                 intro_sec = intro_ms / 1000.0
                 voice = "[0:a]" + ",".join(parts) + "[v]"
@@ -336,8 +390,8 @@ class VideoProcessor(QThread):
 
         temp_audio = os.path.join(self.temp_dir, "temp_audio.m4a")
 
-        if mode == "original" and not has_voice:
-            # 无原声：纯视频输出（片头片尾自然无声）
+        if mode in ("original", "voice_change") and not has_voice:
+            # 无原声：简单变声无法执行，降级为纯视频输出。
             self.status.emit("视频A无音轨，输出纯视频。")
             run_ffmpeg(['ffmpeg', '-y', '-i', temp_output_path, '-c', 'copy', output_path],
                        audio_log_path)

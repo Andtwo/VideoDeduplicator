@@ -8,7 +8,7 @@ FILTER_STYLES = ["random", "warm", "cool", "vintage", "mono", "bright"]
 FX_STYLES = ["random", "grain", "vignette", "bloom", "leak"]
 
 # ⑤ 音频模式：保留原声 / BGM替换 / 原声+BGM混音 / 外部配音替换
-AUDIO_MODES = ["original", "replace_bgm", "mix_bgm", "replace_voice"]
+AUDIO_MODES = ["original", "replace_bgm", "mix_bgm", "replace_voice", "voice_change"]
 
 
 @dataclass
@@ -66,6 +66,8 @@ class ProcessingOptions:
 
     # Web 版扩展：OCR 提取的字幕条目（优先于 caption_text/caption_srt）
     caption_ocr_entries: list = field(default_factory=list)
+    caption_force_bar: bool = False
+    caption_time_map: list = field(default_factory=list)
 
     def sample_randoms(self, rng):
         """任务开始时确定本条视频的随机参数，返回 dict。同一次任务内保持一致。"""
@@ -104,6 +106,8 @@ class ProcessingOptions:
             names.append("intro")
         if self.outro_enabled:
             names.append("outro")
+        if self.drop_enabled:
+            names.append("drop_frames")
         return names
 
     def caption_entries(self, content_duration, speed=1.0):
@@ -113,7 +117,13 @@ class ProcessingOptions:
         OCR 条目优先，时间轴已是输出时间。
         """
         if self.caption_ocr_entries:
-            return self.caption_ocr_entries
+            entries = self.caption_ocr_entries
+            if self.caption_time_map:
+                entries = [
+                    (self._map_caption_time(start), self._map_caption_time(end), text)
+                    for start, end, text in entries
+                ]
+            return entries
         if self.caption_srt and os.path.exists(self.caption_srt):
             from assets import parse_srt
             entries = parse_srt(self.caption_srt)
@@ -125,3 +135,12 @@ class ProcessingOptions:
             return []
         seg = content_duration / len(lines)
         return [(i * seg, (i + 1) * seg, text) for i, text in enumerate(lines)]
+
+    def _map_caption_time(self, source_time):
+        """将原视频时间映射到删帧、变速后的内容输出时间。"""
+        if not self.caption_time_map:
+            return source_time
+        for output_time, mapped_source_time in self.caption_time_map:
+            if mapped_source_time >= source_time:
+                return output_time
+        return self.caption_time_map[-1][0]

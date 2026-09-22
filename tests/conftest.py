@@ -13,10 +13,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("AB_TELEMETRY_ENDPOINT", "http://127.0.0.1:1")
 
 
-def _make_video(path, width, height, duration, with_audio=True, freq=440):
+def _make_video(path, width, height, duration, with_audio=True, freq=440, fps=30):
     """用 ffmpeg 合成测试视频（testsrc + 正弦音轨）。"""
     cmd = ["ffmpeg", "-y",
-           "-f", "lavfi", "-i", f"testsrc2=size={width}x{height}:rate=30:duration={duration}"]
+           "-f", "lavfi", "-i", f"testsrc2=size={width}x{height}:rate={fps}:duration={duration}"]
     if with_audio:
         cmd += ["-f", "lavfi", "-i", f"sine=frequency={freq}:duration={duration}"]
     cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p"]

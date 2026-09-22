@@ -233,15 +233,16 @@ class StickerOverlay:
 class CaptionBar:
     """字幕条：底部半透明条 + 白色文本，按内容段时间轴切换。"""
 
-    def __init__(self, entries, width, height, fps):
+    def __init__(self, entries, width, height, fps, force_bar=False):
         self.entries = entries
         self.fps = fps
+        self.force_bar = force_bar
         bar_h = max(int(height * 0.13), 40)
         self.bar_y = height - bar_h - max(4, height // 120)
         self.bar_h = bar_h
         # 半透明黑色条（预生成 float 层）
         self.bar_rgb = np.zeros((bar_h, width, 3), dtype=np.float32)
-        self.bar_alpha = np.full((bar_h, width, 1), 0.55, dtype=np.float32)
+        self.bar_alpha = np.full((bar_h, width, 1), 0.92, dtype=np.float32)
         # 预渲染各条目文本层
         font_size = max(16, int(height * 0.042))
         font = load_font(font_size)
@@ -290,19 +291,24 @@ class CaptionBar:
     def apply(self, frame, content_index):
         t = content_index / self.fps
         # 线性扫描（条目数通常很少）
+        active_idx = None
         for idx, (start, end, _) in enumerate(self.entries):
             if start <= t < end:
-                text_rgb, text_a = self.text_layers[idx]
-                bar = frame.astype(np.float32)
-                bar[self.bar_y:self.bar_y + self.bar_h] = (
-                    bar[self.bar_y:self.bar_y + self.bar_h] * (1.0 - self.bar_alpha)
-                    + self.bar_rgb * self.bar_alpha)
-                th, _ = text_rgb.shape[:2]
-                y0 = self.bar_y + (self.bar_h - th) // 2
-                region = bar[y0:y0 + th]
-                bar[y0:y0 + th] = region * (1.0 - text_a) + text_rgb * text_a
-                return np.clip(bar, 0, 255).astype(np.uint8)
-        return frame
+                active_idx = idx
+                break
+        if active_idx is None and not self.force_bar:
+            return frame
+        bar = frame.astype(np.float32)
+        bar[self.bar_y:self.bar_y + self.bar_h] = (
+            bar[self.bar_y:self.bar_y + self.bar_h] * (1.0 - self.bar_alpha)
+            + self.bar_rgb * self.bar_alpha)
+        if active_idx is not None:
+            text_rgb, text_a = self.text_layers[active_idx]
+            th, _ = text_rgb.shape[:2]
+            y0 = self.bar_y + (self.bar_h - th) // 2
+            region = bar[y0:y0 + th]
+            bar[y0:y0 + th] = region * (1.0 - text_a) + text_rgb * text_a
+        return np.clip(bar, 0, 255).astype(np.uint8)
 
 
 class FancyText:
@@ -417,8 +423,11 @@ class EffectPipeline:
             self.effects.append(StickerOverlay(rng, width, height))
         if options.caption_enabled and content_duration:
             entries = options.caption_entries(content_duration, speed)
-            if entries:
-                self.effects.append(CaptionBar(entries, width, height, fps))
+            if entries or options.caption_force_bar:
+                self.effects.append(CaptionBar(
+                    entries, width, height, fps,
+                    force_bar=options.caption_force_bar,
+                ))
         if options.fancy_enabled and options.fancy_text.strip():
             self.effects.append(FancyText(options.fancy_text.strip(), rng, width, height))
 

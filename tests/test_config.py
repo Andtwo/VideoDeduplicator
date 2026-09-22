@@ -68,6 +68,13 @@ class TestCaptionEntries:
         assert entries[0][0] == pytest.approx(0.5 / 1.25)
         assert entries[1][1] == pytest.approx(4.0 / 1.25)
 
+    def test_ocr_entries_follow_drop_frame_time_map(self):
+        opts = ProcessingOptions(
+            caption_ocr_entries=[(1.0, 2.0, "字幕")],
+            caption_time_map=[(0.0, 0.0), (0.8, 1.0), (1.6, 2.0)],
+        )
+        assert opts.caption_entries(2.0) == [(0.8, 1.6, "字幕")]
+
     def test_empty_text_no_entries(self):
         opts = ProcessingOptions(caption_enabled=True, caption_text="  \n  ")
         assert opts.caption_entries(4.0) == []
@@ -83,5 +90,6 @@ class TestEnabledFeatures:
             speed_enabled=True, zoom_enabled=True, mirror_enabled=True,
             filter_enabled=True, fx_enabled=True, sticker_enabled=True,
             caption_enabled=True, fancy_enabled=True, progress_enabled=True,
-            intro_enabled=True, outro_enabled=True, audio_mode="replace_voice")
-        assert len(opts.enabled_features()) == 12
+            intro_enabled=True, outro_enabled=True, audio_mode="replace_voice",
+            drop_enabled=True, drop_per_second=2)
+        assert len(opts.enabled_features()) == 13

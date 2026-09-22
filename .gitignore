@@ -10,3 +10,5 @@ telemetry-server/data/
 软件界面*.png
 uploads/
 web_outputs/
+web_test_results/
+venv_web/

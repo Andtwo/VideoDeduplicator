@@ -85,6 +85,13 @@ class TestBrandingOverlays:
         assert shown[H - 40:].mean() < frame[H - 40:].mean()
         np.testing.assert_array_equal(hidden, frame)
 
+    def test_caption_bar_can_force_opaque_cover_without_text(self):
+        bar = CaptionBar([], W, H, fps=30, force_bar=True)
+        frame = np.full((H, W, 3), 255, dtype=np.uint8)
+        shown = bar.apply(frame, 30)
+        region = shown[bar.bar_y:bar.bar_y + bar.bar_h]
+        assert region.mean() < 30
+
     def test_fancy_text_draws(self):
         fancy = FancyText("标题", np.random.default_rng(0), W, H)
         frame = make_frame(3)

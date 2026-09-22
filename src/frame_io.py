@@ -30,3 +30,34 @@ def frame_reader(video_path, width, height):
     finally:
         pipe.kill()
         pipe.wait()
+
+
+def resampled_frame_reader(video_path, width, height, source_fps, target_fps, frame_count):
+    """按目标帧率流式重采样，支持丢帧和重复帧且保持完整时间轴。"""
+    reader = frame_reader(video_path, width, height)
+    current = None
+    source_index = -1
+    try:
+        for output_index in range(frame_count):
+            wanted = int(output_index * source_fps / target_fps)
+            while source_index < wanted:
+                current = next(reader)
+                source_index += 1
+            if current is None:
+                return
+            yield current.copy()
+    except StopIteration:
+        return
+    finally:
+        reader.close()
+
+
+def looping_frame_reader(video_path, width, height):
+    """循环读取视频，但不缓存解码帧，适合长素材视频。"""
+    while True:
+        yielded = False
+        for frame in frame_reader(video_path, width, height):
+            yielded = True
+            yield frame
+        if not yielded:
+            return
