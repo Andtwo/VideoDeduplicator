@@ -282,17 +282,17 @@ class MainWindow(QMainWindow):
         self.radio_60 = QRadioButton("50% · 60fps")
         self.radio_120 = QRadioButton("75% · 120fps")
         self.radio_240 = QRadioButton("87.5% · 240fps")
-        self.radio_60.setChecked(True)
-        fps_button_group = QButtonGroup(self)
-        fps_button_group.addButton(self.radio_60)
-        fps_button_group.addButton(self.radio_120)
-        fps_button_group.addButton(self.radio_240)
+        self.radio_60.setChecked(False)
+        self.fps_button_group = QButtonGroup(self)
+        self.fps_button_group.setExclusive(True)
+        for radio in (self.radio_60, self.radio_120, self.radio_240):
+            self.fps_button_group.addButton(radio)
         fps_row.addWidget(self.radio_60)
         fps_row.addWidget(self.radio_120)
         fps_row.addWidget(self.radio_240)
         fps_row.addStretch()
         options_layout.addLayout(fps_row)
-        self.fps_hint = QLabel("混合素材帧需要选择处理强度")
+        self.fps_hint = QLabel("未选择素材视频时无需设置处理强度")
         self.fps_hint.setObjectName("param_label")
         options_layout.addWidget(self.fps_hint)
 
@@ -345,6 +345,28 @@ class MainWindow(QMainWindow):
         self.temp_dir = os.path.join(os.path.expanduser("~"), ".video_temp_optimized")
         if not os.path.exists(self.temp_dir):
             os.makedirs(self.temp_dir)
+        self.check_run_enable()
+
+    def _update_fps_controls(self, enabled):
+        """视频 B 是可选的：无 B 时关闭并清除所有处理强度选择。"""
+        has_b = bool(self.video_b_path)
+        fps_enabled = bool(enabled and has_b)
+        for radio in (self.radio_60, self.radio_120, self.radio_240):
+            radio.setEnabled(fps_enabled)
+        if not has_b:
+            # disabled 的 QRadioButton 仍会保留 checked 状态，必须显式清除。
+            self.fps_button_group.setExclusive(False)
+            for radio in (self.radio_60, self.radio_120, self.radio_240):
+                radio.setChecked(False)
+            self.fps_button_group.setExclusive(True)
+            self.fps_hint.setText("未选择素材视频时无需设置处理强度")
+            self.fps_hint.setVisible(True)
+        elif not any(r.isChecked() for r in (self.radio_60, self.radio_120, self.radio_240)):
+            self.radio_60.setChecked(True)
+            self.fps_hint.setText("已选择素材视频，请选择帧混合处理强度")
+            self.fps_hint.setVisible(True)
+        else:
+            self.fps_hint.setVisible(False)
 
     def _file_row(self, name, hint, path_label, btn):
         """素材/输出文件选择行：左侧字段名（悬停显示说明），右侧路径与浏览按钮。"""
@@ -648,6 +670,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'fps_hint'):
             self.fps_hint.setVisible(not mix_enabled)
         self.btn_run.setEnabled(has_a and has_out)
+        self._update_fps_controls(True)
 
     def _init_telemetry_consent(self):
         """首次启动弹出统计说明，用户选择前不上报任何事件。"""
@@ -737,10 +760,7 @@ class MainWindow(QMainWindow):
         self.btn_output.setEnabled(enabled)
         is_ready = bool(enabled and self.video_a_path and self.output_path)
         self.btn_run.setEnabled(is_ready)
-        mix_enabled = enabled and bool(self.video_b_path)
-        self.radio_60.setEnabled(mix_enabled)
-        self.radio_120.setEnabled(mix_enabled)
-        self.radio_240.setEnabled(mix_enabled)
+        self._update_fps_controls(enabled)
         self.gpu_checkbox.setEnabled(enabled)
         self.telemetry_checkbox.setEnabled(enabled)
         for w in (self.speed_check, self.speed_random_check, self.speed_min_spin, self.speed_max_spin,
