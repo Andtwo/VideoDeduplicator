@@ -12,7 +12,18 @@ from frame_io import looping_frame_reader
 from web import app as web_app
 from web import ocr_subs
 from web.overlays import TitleOverlay
+from web.strategy import generate_strategy
 from web.worker import WebVideoProcessor, run_job
+
+
+def test_strategy_puts_mirror_first_and_caption_bar_last():
+    import random
+
+    for seed in range(200):
+        strategy = generate_strategy(rng=random.Random(seed))
+        if "mirror" in strategy["steps"]:
+            assert strategy["steps"][0] == "mirror"
+            assert "caption_bar" in strategy["steps"]
 
 
 def test_title_overlay_defers_layout_until_frame_size_is_known():

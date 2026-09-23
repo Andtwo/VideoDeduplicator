@@ -237,12 +237,12 @@ class CaptionBar:
         self.entries = entries
         self.fps = fps
         self.force_bar = force_bar
-        bar_h = max(int(height * 0.13), 40)
-        self.bar_y = height - bar_h - max(4, height // 120)
+        bar_h = max(int(height * 0.16), 48)
+        self.bar_y = height - bar_h
         self.bar_h = bar_h
         # 半透明黑色条（预生成 float 层）
         self.bar_rgb = np.zeros((bar_h, width, 3), dtype=np.float32)
-        self.bar_alpha = np.full((bar_h, width, 1), 0.92, dtype=np.float32)
+        self.bar_alpha = np.ones((bar_h, width, 1), dtype=np.float32)
         # 预渲染各条目文本层
         font_size = max(16, int(height * 0.042))
         font = load_font(font_size)
@@ -398,38 +398,38 @@ class ProgressBarOverlay:
 class EffectPipeline:
     """按配置组装效果并逐帧应用。apply 针对主内容段的输出帧（变速筛选后）。
 
-    顺序：ZoomCrop（几何）-> Mirror -> ColorFilter -> 特效 -> 贴纸/字幕/花字。
-    镜像只处理主视频帧，后续叠加层保持正常阅读方向。
+    顺序：Mirror -> ZoomCrop/滤镜/特效 -> 贴纸/字幕/花字。
+    镜像固定为第一步，只处理主画面；所有新增叠加层都在镜像后绘制。
     """
 
     def __init__(self, options, rng, width, height, fps=60, content_duration=None, speed=1.0):
         self.fx_style = None
         self.filter_style = None
         self.zoom = None
-        self.effects = []
-        if options.mirror_enabled:
-            self.effects.append(Mirror())
+        self.mirror = Mirror() if options.mirror_enabled else None
+        self.base_effects = []
+        self.overlays = []
         if options.filter_enabled:
             fx = ColorFilter(options.filter_style, options.filter_strength, rng)
             self.filter_style = fx.style
-            self.effects.append(fx)
+            self.base_effects.append(fx)
         if options.fx_enabled:
             fx_cls = {"grain": GrainFx, "vignette": VignetteFx,
                       "bloom": BloomFx, "leak": LeakFx}
             style = rng.choice(FX_STYLES[1:]) if options.fx_style == "random" else options.fx_style
             self.fx_style = style
-            self.effects.append(fx_cls[style](options.fx_strength, rng, (height, width)))
+            self.base_effects.append(fx_cls[style](options.fx_strength, rng, (height, width)))
         if options.sticker_enabled:
-            self.effects.append(StickerOverlay(rng, width, height))
+            self.overlays.append(StickerOverlay(rng, width, height))
         if options.caption_enabled and content_duration:
             entries = options.caption_entries(content_duration, speed)
             if entries or options.caption_force_bar:
-                self.effects.append(CaptionBar(
+                self.overlays.append(CaptionBar(
                     entries, width, height, fps,
                     force_bar=options.caption_force_bar,
                 ))
         if options.fancy_enabled and options.fancy_text.strip():
-            self.effects.append(FancyText(options.fancy_text.strip(), rng, width, height))
+            self.overlays.append(FancyText(options.fancy_text.strip(), rng, width, height))
 
     def set_zoom(self, zoom_scale):
         """设置画面放大比例（由 options.sample_randoms 采样后传入）。"""
@@ -437,12 +437,17 @@ class EffectPipeline:
             self.zoom = ZoomCrop(zoom_scale)
 
     def apply(self, frame, out_index):
+        if self.mirror is not None:
+            frame = self.mirror.apply(frame, out_index)
         if self.zoom is not None:
             frame = self.zoom.apply(frame, out_index)
-        for e in self.effects:
-            frame = e.apply(frame, out_index)
+        for effect in self.base_effects:
+            frame = effect.apply(frame, out_index)
+        for overlay in self.overlays:
+            frame = overlay.apply(frame, out_index)
         return frame
 
     @property
     def is_identity(self):
-        return self.zoom is None and not self.effects
+        return (self.mirror is None and self.zoom is None
+                and not self.base_effects and not self.overlays)

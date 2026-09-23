@@ -24,8 +24,10 @@ def generate_strategy(has_audio_file=False, has_video_b=False, title="", rng=Non
     steps = rng.sample(VISUAL_STEPS, n)
 
     # 镜像反转后必须压字幕条
-    if "mirror" in steps and "caption_bar" not in steps:
-        steps.append("caption_bar")
+    if "mirror" in steps:
+        steps = ["mirror"] + [step for step in steps if step != "mirror"]
+        if "caption_bar" not in steps:
+            steps.append("caption_bar")
 
     # 音频模式：原声 / BGM 替换 / 简单变声
     audio_modes = ["original", "voice_change"]

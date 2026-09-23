@@ -74,6 +74,34 @@ class TestPixelEffects:
         frame = make_frame()
         np.testing.assert_array_equal(pipeline.apply(frame, 0), frame[:, ::-1])
 
+    def test_mirror_is_always_before_post_overlays(self):
+        opts = ProcessingOptions(
+            mirror_enabled=True,
+            sticker_enabled=True,
+            caption_enabled=True,
+            caption_text="正常字幕",
+            fancy_enabled=True,
+            fancy_text="正常花字",
+        )
+        pipeline = EffectPipeline(opts, np.random.default_rng(7), W, H,
+                                  fps=30, content_duration=4.0, speed=1.0)
+        assert isinstance(pipeline.mirror, Mirror)
+        assert all(not isinstance(effect, (StickerOverlay, CaptionBar, FancyText))
+                   for effect in pipeline.base_effects)
+        assert any(isinstance(overlay, StickerOverlay) for overlay in pipeline.overlays)
+        assert any(isinstance(overlay, CaptionBar) for overlay in pipeline.overlays)
+        assert any(isinstance(overlay, FancyText) for overlay in pipeline.overlays)
+
+        frame = make_frame(9)
+        expected = pipeline.mirror.apply(frame, 30)
+        if pipeline.zoom is not None:
+            expected = pipeline.zoom.apply(expected, 30)
+        for effect in pipeline.base_effects:
+            expected = effect.apply(expected, 30)
+        for overlay in pipeline.overlays:
+            expected = overlay.apply(expected, 30)
+        np.testing.assert_array_equal(pipeline.apply(frame, 30), expected)
+
 
 class TestBrandingOverlays:
     def test_caption_bar_shows_and_hides(self):
@@ -90,7 +118,8 @@ class TestBrandingOverlays:
         frame = np.full((H, W, 3), 255, dtype=np.uint8)
         shown = bar.apply(frame, 30)
         region = shown[bar.bar_y:bar.bar_y + bar.bar_h]
-        assert region.mean() < 30
+        assert bar.bar_y + bar.bar_h == H
+        assert region.max() == 0
 
     def test_fancy_text_draws(self):
         fancy = FancyText("标题", np.random.default_rng(0), W, H)
