@@ -38,7 +38,9 @@ def run_job(job, on_status=None):
     if "mirror" in steps:
         opts.mirror_enabled = True
     if "filter" in steps:
-        opts.filter_enabled, opts.filter_style, opts.filter_strength = True, strategy["filter_style"], 0.35
+        opts.filter_enabled = True
+        opts.filter_style = strategy["filter_style"]
+        opts.filter_strength = strategy.get("filter_strength", 1.0)
     if "fx" in steps:
         opts.fx_enabled, opts.fx_style, opts.fx_strength = True, strategy["fx_style"], 0.25
     if "sticker" in steps:

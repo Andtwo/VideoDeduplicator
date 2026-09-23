@@ -28,6 +28,7 @@ DEFAULT_CONFIG = {
     "speed_min": 1.05,
     "speed_max": 1.20,
     "filter_styles": FILTER_STYLES.copy(),
+    "filter_strength": 1.0,
     "fx_styles": FX_STYLES.copy(),
     "intro_min": 0.8,
     "intro_max": 1.5,
@@ -90,6 +91,9 @@ def validate_strategy_config(raw):
     outro_min, outro_max = _bounded_pair(config, "outro_min", "outro_max", 0.0, 5.0, "片尾时长")
 
     filter_styles = list(dict.fromkeys(config.get("filter_styles") or []))
+    filter_strength = float(config.get("filter_strength", 1.0))
+    if not 0.0 <= filter_strength <= 1.0:
+        raise ValueError("滤镜强度必须在 0-100% 范围内")
     fx_styles = list(dict.fromkeys(config.get("fx_styles") or []))
     if "filter" in steps and (not filter_styles or set(filter_styles) - set(FILTER_STYLES)):
         raise ValueError("滤镜步骤需要至少一个有效滤镜样式")
@@ -110,6 +114,7 @@ def validate_strategy_config(raw):
         "speed_min": round(speed_min, 2),
         "speed_max": round(speed_max, 2),
         "filter_styles": filter_styles,
+        "filter_strength": round(filter_strength, 2),
         "fx_styles": fx_styles,
         "intro_min": round(intro_min, 1),
         "intro_max": round(intro_max, 1),
@@ -150,6 +155,7 @@ def generate_strategy(has_audio_file=False, has_video_b=False, title="", rng=Non
         "speed": round(rng.uniform(config["speed_min"], config["speed_max"]), 2) if "speed" in steps else 1.0,
         "zoom": round(rng.uniform(config["zoom_min"], config["zoom_max"]), 2) if "zoom" in steps else 1.0,
         "filter_style": rng.choice(config["filter_styles"]) if "filter" in steps else None,
+        "filter_strength": config["filter_strength"] if "filter" in steps else 0.0,
         "fx_style": rng.choice(config["fx_styles"]) if "fx" in steps else None,
         "intro_duration": round(rng.uniform(config["intro_min"], config["intro_max"]), 1) if "intro" in steps else 0,
         "outro_duration": round(rng.uniform(config["outro_min"], config["outro_max"]), 1) if "outro" in steps else 0,

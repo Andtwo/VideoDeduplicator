@@ -56,6 +56,19 @@ def test_random_step_range_is_clamped_to_selected_candidates():
     assert set(strategy["steps"]) == {"zoom", "fancy", "drop_frames"}
 
 
+def test_strategy_snapshot_includes_filter_strength():
+    config = validate_strategy_config({
+        **DEFAULT_CONFIG,
+        "selection_mode": "fixed",
+        "steps": ["zoom", "fancy", "filter"],
+        "filter_styles": ["mono"],
+        "filter_strength": 0.82,
+    })
+    strategy = generate_strategy(config=config)
+    assert strategy["filter_style"] == "mono"
+    assert strategy["filter_strength"] == 0.82
+
+
 def test_strategy_ranges_swap_and_accept_zoom_percentages():
     reversed_config = validate_strategy_config({
         **DEFAULT_CONFIG,
@@ -209,6 +222,7 @@ def test_worker_applies_selected_mono_filter(monkeypatch, tmp_path):
     options = captured["options"]
     assert options.filter_enabled
     assert options.filter_style == "mono"
+    assert options.filter_strength == 1.0
 
 
 def test_worker_applies_fixed_speed_from_strategy(monkeypatch, tmp_path):
