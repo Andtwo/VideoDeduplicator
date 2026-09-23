@@ -1,6 +1,6 @@
 """后期效果管线：像素级处理在帧循环中逐帧应用。
 
-处理顺序：几何（缩放 -> 镜像）-> 色调（滤镜 -> 特效）-> 叠加（贴纸/字幕/花字）。
+处理顺序：镜像 -> 几何缩放 -> 色调（滤镜/特效）-> 叠加（贴纸/字幕/花字）。
 镜像只作用于主视频画面；所有叠加层在镜像后绘制，保持正常方向与位置。
 静态叠加层（贴纸）在初始化时预合成，每帧仅做一次 alpha 混合。
 """
@@ -13,7 +13,6 @@ from PIL import Image as _PILImage
 from config import FILTER_STYLES, FX_STYLES
 from assets import STICKER_KINDS, get_sticker, load_font
 
-Image_FLIP = _PILImage.FLIP_LEFT_RIGHT
 Image_BICUBIC = _PILImage.BICUBIC
 
 
@@ -191,15 +190,13 @@ class LeakFx:
 class StickerOverlay:
     """四角贴纸：初始化时随机选图、随机大小与位置，预合成 RGBA 层。"""
 
-    def __init__(self, rng, width, height):
+    def __init__(self, rng, width, height, bottom_safe_y=None, reserve_top_left=False):
         rgb = np.zeros((height, width, 3), dtype=np.float32)
         alpha = np.zeros((height, width), dtype=np.float32)
-        corners = [(0, 0), (1, 0), (0, 1), (1, 1)]
+        corners = [(1, 0), (0, 1), (1, 1)] if reserve_top_left else [(0, 0), (1, 0), (0, 1), (1, 1)]
         for corner_x, corner_y in corners:
             size = int(width * rng.uniform(0.055, 0.11))
             sticker = get_sticker(rng.choice(STICKER_KINDS), size)
-            if rng.random() < 0.5:
-                sticker = sticker.transpose(Image_FLIP)
             sticker = sticker.rotate(rng.uniform(-18, 18), expand=True, resample=Image_BICUBIC)
             sw, sh = sticker.size
             # 角落内随机偏移，避免贴纸超出画面
@@ -211,7 +208,12 @@ class StickerOverlay:
             if corner_y == 0:
                 y0 = int(rng.integers(int(height * 0.015), max(1, max_dy)))
             else:
-                y0 = int(rng.integers(height - max_dy - sh, max(height - sh - int(height * 0.015), 1)))
+                lower_bound = height - max_dy - sh
+                upper_bound = height - sh - int(height * 0.015)
+                if bottom_safe_y is not None:
+                    upper_bound = min(upper_bound, bottom_safe_y - sh - int(height * 0.015))
+                    lower_bound = min(lower_bound, upper_bound)
+                y0 = int(rng.integers(lower_bound, max(lower_bound + 1, upper_bound + 1)))
             x0 = max(0, min(x0, width - sw))
             y0 = max(0, min(y0, height - sh))
             arr = np.asarray(sticker, dtype=np.float32)
@@ -231,26 +233,54 @@ class StickerOverlay:
 
 
 class CaptionBar:
-    """字幕条：底部半透明条 + 白色文本，按内容段时间轴切换。"""
+    """字幕条：普通字幕半透明；OCR 镜像字幕按检测框不透明遮挡。"""
 
     def __init__(self, entries, width, height, fps, force_bar=False):
         self.entries = entries
         self.fps = fps
         self.force_bar = force_bar
-        bar_h = max(int(height * 0.16), 48)
-        self.bar_y = height - bar_h
-        self.bar_h = bar_h
-        # 半透明黑色条（预生成 float 层）
-        self.bar_rgb = np.zeros((bar_h, width, 3), dtype=np.float32)
-        self.bar_alpha = np.ones((bar_h, width, 1), dtype=np.float32)
+        self.height = height
+        if force_bar:
+            covered = [entry[3:5] for entry in entries if len(entry) >= 5]
+            self.safe_top_y = max(0, int(height * min((top for top, _ in covered), default=0.84)))
+            self.fallback_top = 0.84
+            self.fallback_bottom = 1.0
+            self.bar_y = int(height * self.fallback_top)
+            self.bar_h = height - self.bar_y
+            alpha = 1.0
+        else:
+            self.bar_h = max(int(height * 0.13), 40)
+            self.bar_y = height - self.bar_h - max(4, height // 120)
+            self.fallback_top = self.bar_y / height
+            self.fallback_bottom = (self.bar_y + self.bar_h) / height
+            self.safe_top_y = self.bar_y
+            alpha = 0.55
+        self.bar_rgb = np.zeros((self.bar_h, width, 3), dtype=np.float32)
+        self.bar_alpha = np.full((self.bar_h, width, 1), alpha, dtype=np.float32)
         # 预渲染各条目文本层
         font_size = max(16, int(height * 0.042))
         font = load_font(font_size)
         max_width = int(width * 0.86)
         self.text_layers = []
-        for _, _, text in entries:
-            layer = self._render_text(text, font, font_size, width, bar_h, max_width)
+        for entry in entries:
+            entry_y0, entry_y1 = self._entry_bounds(entry)
+            layer = self._render_text(
+                entry[2], font, font_size, width,
+                max(1, entry_y1 - entry_y0), max_width,
+            )
             self.text_layers.append(layer)
+
+    def _entry_bounds(self, entry):
+        if self.force_bar and len(entry) >= 5:
+            y0 = max(0, int(self.height * entry[3]))
+            y1 = min(self.height, int(self.height * entry[4]))
+            max_height = max(48, int(self.height * 0.16))
+            if y1 - y0 > max_height:
+                center = (y0 + y1) // 2
+                y0 = max(0, center - max_height // 2)
+                y1 = min(self.height, y0 + max_height)
+            return y0, max(y0 + 1, y1)
+        return self.bar_y, self.bar_y + self.bar_h
 
     def _render_text(self, text, font, font_size, width, bar_h, max_width):
         """渲染居中多行文本，返回 (y偏移, rgb, alpha)。"""
@@ -292,29 +322,38 @@ class CaptionBar:
         t = content_index / self.fps
         # 线性扫描（条目数通常很少）
         active_idx = None
-        for idx, (start, end, _) in enumerate(self.entries):
-            if start <= t < end:
+        for idx, entry in enumerate(self.entries):
+            if entry[0] <= t < entry[1]:
                 active_idx = idx
                 break
         if active_idx is None and not self.force_bar:
             return frame
+        entry = self.entries[active_idx] if active_idx is not None else None
+        if entry is not None:
+            y0, y1 = self._entry_bounds(entry)
+        else:
+            y0 = self.bar_y
+            y1 = self.bar_y + self.bar_h
         bar = frame.astype(np.float32)
-        bar[self.bar_y:self.bar_y + self.bar_h] = (
-            bar[self.bar_y:self.bar_y + self.bar_h] * (1.0 - self.bar_alpha)
-            + self.bar_rgb * self.bar_alpha)
+        bar[y0:y1] = 0
+        if not self.force_bar:
+            bar[y0:y1] = (
+                frame[y0:y1].astype(np.float32) * (1.0 - self.bar_alpha)
+                + self.bar_rgb * self.bar_alpha)
         if active_idx is not None:
             text_rgb, text_a = self.text_layers[active_idx]
             th, _ = text_rgb.shape[:2]
-            y0 = self.bar_y + (self.bar_h - th) // 2
-            region = bar[y0:y0 + th]
-            bar[y0:y0 + th] = region * (1.0 - text_a) + text_rgb * text_a
+            text_y = y0 + max(0, (y1 - y0 - th) // 2)
+            region = bar[text_y:text_y + th]
+            if region.shape[:2] == text_rgb.shape[:2]:
+                bar[text_y:text_y + th] = region * (1.0 - text_a) + text_rgb * text_a
         return np.clip(bar, 0, 255).astype(np.uint8)
 
 
 class FancyText:
     """花字：画面上部大字，渐变填充 + 白描边 + 阴影，任务内静态。"""
 
-    def __init__(self, text, rng, width, height):
+    def __init__(self, text, rng, width, height, reserve_top_left=False):
         font_size = max(24, int(height * 0.075))
         font = load_font(font_size)
         # 渐变色（从随机色相中选一组高饱和渐变）
@@ -342,8 +381,11 @@ class FancyText:
         layer.paste(gradient, (0, 0), mask)
         # 随机水平位置（上部 8%~16% 区域）
         lw, lh = layer.size
-        x0 = int(rng.integers(0, max(1, width - lw))) if lw < width else 0
-        y0 = int(height * rng.uniform(0.06, 0.12))
+        min_x = 0
+        max_x = max(1, width - lw)
+        x0 = int(rng.integers(min_x, max_x)) if lw < width else 0
+        y_range = (0.20, 0.26) if reserve_top_left else (0.06, 0.12)
+        y0 = int(height * rng.uniform(*y_range))
         self.layer_rgb = np.zeros((height, width, 3), dtype=np.float32)
         self.layer_a = np.zeros((height, width, 1), dtype=np.float32)
         x1, y1 = min(x0 + lw, width), min(y0 + lh, height)
@@ -402,10 +444,11 @@ class EffectPipeline:
     镜像固定为第一步，只处理主画面；所有新增叠加层都在镜像后绘制。
     """
 
-    def __init__(self, options, rng, width, height, fps=60, content_duration=None, speed=1.0):
+    def __init__(self, options, rng, width, height, fps=60, content_duration=None,
+                 speed=1.0, zoom_scale=1.0):
         self.fx_style = None
         self.filter_style = None
-        self.zoom = None
+        self.zoom = ZoomCrop(zoom_scale) if zoom_scale and zoom_scale > 1.001 else None
         self.mirror = Mirror() if options.mirror_enabled else None
         self.base_effects = []
         self.overlays = []
@@ -419,22 +462,41 @@ class EffectPipeline:
             style = rng.choice(FX_STYLES[1:]) if options.fx_style == "random" else options.fx_style
             self.fx_style = style
             self.base_effects.append(fx_cls[style](options.fx_strength, rng, (height, width)))
-        if options.sticker_enabled:
-            self.overlays.append(StickerOverlay(rng, width, height))
+        entries = []
+        caption_overlay = None
         if options.caption_enabled and content_duration:
             entries = options.caption_entries(content_duration, speed)
+            if options.caption_force_bar and self.zoom is not None:
+                entries = [self._map_entry_for_zoom(entry, self.zoom.scale) for entry in entries]
             if entries or options.caption_force_bar:
-                self.overlays.append(CaptionBar(
+                caption_overlay = CaptionBar(
                     entries, width, height, fps,
                     force_bar=options.caption_force_bar,
-                ))
+                )
+        if options.sticker_enabled:
+            bottom_safe_y = caption_overlay.safe_top_y if caption_overlay and options.caption_force_bar else None
+            self.overlays.append(StickerOverlay(
+                rng, width, height,
+                bottom_safe_y=bottom_safe_y,
+                reserve_top_left=options.reserve_top_left,
+            ))
+        if caption_overlay is not None:
+            self.overlays.append(caption_overlay)
         if options.fancy_enabled and options.fancy_text.strip():
-            self.overlays.append(FancyText(options.fancy_text.strip(), rng, width, height))
+            self.overlays.append(FancyText(
+                options.fancy_text.strip(), rng, width, height,
+                reserve_top_left=options.reserve_top_left,
+            ))
 
-    def set_zoom(self, zoom_scale):
-        """设置画面放大比例（由 options.sample_randoms 采样后传入）。"""
-        if zoom_scale and zoom_scale > 1.001:
-            self.zoom = ZoomCrop(zoom_scale)
+    @staticmethod
+    def _map_entry_for_zoom(entry, scale):
+        if len(entry) < 5 or scale <= 1.001:
+            return entry
+        crop_margin = (1.0 - 1.0 / scale) / 2.0
+        visible = 1.0 / scale
+        top = max(0.0, min(1.0, (entry[3] - crop_margin) / visible))
+        bottom = max(0.0, min(1.0, (entry[4] - crop_margin) / visible))
+        return (*entry[:3], top, bottom)
 
     def apply(self, frame, out_index):
         if self.mirror is not None:

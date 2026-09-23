@@ -68,6 +68,7 @@ class ProcessingOptions:
     caption_ocr_entries: list = field(default_factory=list)
     caption_force_bar: bool = False
     caption_time_map: list = field(default_factory=list)
+    reserve_top_left: bool = False
 
     def sample_randoms(self, rng):
         """任务开始时确定本条视频的随机参数，返回 dict。同一次任务内保持一致。"""
@@ -120,8 +121,8 @@ class ProcessingOptions:
             entries = self.caption_ocr_entries
             if self.caption_time_map:
                 entries = [
-                    (self._map_caption_time(start), self._map_caption_time(end), text)
-                    for start, end, text in entries
+                    (self._map_caption_time(entry[0]), self._map_caption_time(entry[1]), *entry[2:])
+                    for entry in entries
                 ]
             return entries
         if self.caption_srt and os.path.exists(self.caption_srt):

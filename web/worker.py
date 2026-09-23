@@ -26,7 +26,7 @@ def run_job(job, on_status=None):
     steps = strategy["steps"]
     status(f"随机策略: {', '.join(steps)} / 音频={strategy['audio_mode']} / fps={strategy['fps']}")
 
-    opts = ProcessingOptions()
+    opts = ProcessingOptions(reserve_top_left=bool(title))
     if "zoom" in steps:
         opts.zoom_enabled, opts.zoom_random, opts.zoom_min, opts.zoom_max = True, False, strategy["zoom"], strategy["zoom"]
     if "mirror" in steps:

@@ -102,6 +102,52 @@ class TestPixelEffects:
             expected = overlay.apply(expected, 30)
         np.testing.assert_array_equal(pipeline.apply(frame, 30), expected)
 
+    def test_directional_sticker_is_not_flipped(self, monkeypatch):
+        from PIL import Image
+
+        sticker = np.zeros((64, 64, 4), dtype=np.uint8)
+        sticker[20:44, 6:20] = (255, 0, 0, 255)
+        sticker[20:44, 44:58] = (0, 0, 255, 255)
+        directional = Image.fromarray(sticker)
+        monkeypatch.setattr("effects.get_sticker", lambda _kind, _size: directional.copy())
+
+        class FixedRng:
+            def uniform(self, low, high):
+                return 0.08 if high <= 0.11 else 0.0
+
+            def choice(self, values):
+                return values[0]
+
+            def integers(self, low, high=None):
+                return low
+
+        overlay = StickerOverlay(FixedRng(), W, H)
+        region_alpha = overlay.alpha[:H // 2, :W // 2, 0]
+        colored = np.where(region_alpha > 0.9)
+        x0, x1 = colored[1].min(), colored[1].max()
+        y = int(np.median(colored[0]))
+        left = overlay.rgb[y, x0:x0 + 14]
+        right = overlay.rgb[y, x1 - 13:x1 + 1]
+        assert left[:, 0].mean() > left[:, 2].mean() + 100
+        assert right[:, 2].mean() > right[:, 0].mean() + 100
+
+    def test_title_safe_zone_excludes_top_stickers_and_moves_fancy_text(self):
+        pipeline = EffectPipeline(
+            ProcessingOptions(
+                sticker_enabled=True,
+                fancy_enabled=True,
+                fancy_text="精彩片段",
+                reserve_top_left=True,
+            ),
+            np.random.default_rng(4), W, H,
+            fps=30, content_duration=2.0, speed=1.0,
+        )
+        sticker = next(item for item in pipeline.overlays if isinstance(item, StickerOverlay))
+        fancy = next(item for item in pipeline.overlays if isinstance(item, FancyText))
+        assert sticker.alpha[:int(H * 0.18), :W // 2].max() == 0
+        assert sticker.alpha[:int(H * 0.18), W // 2:].max() > 0
+        assert fancy.layer_a[:int(H * 0.18)].max() == 0
+
 
 class TestBrandingOverlays:
     def test_caption_bar_shows_and_hides(self):
@@ -113,13 +159,50 @@ class TestBrandingOverlays:
         assert shown[H - 40:].mean() < frame[H - 40:].mean()
         np.testing.assert_array_equal(hidden, frame)
 
-    def test_caption_bar_can_force_opaque_cover_without_text(self):
-        bar = CaptionBar([], W, H, fps=30, force_bar=True)
+    def test_normal_caption_keeps_compact_translucent_style(self):
+        bar = CaptionBar([(0.0, 2.0, "字幕")], W, H, fps=30)
+        frame = np.full((H, W, 3), 200, dtype=np.uint8)
+        shown = bar.apply(frame, 0)
+        background = shown[bar.bar_y:bar.bar_y + 4]
+        assert bar.bar_h == max(int(H * 0.13), 40)
+        assert 70 < background.mean() < 130
+
+    def test_caption_bar_uses_ocr_coordinates_for_opaque_cover(self):
+        bar = CaptionBar([(0.0, 2.0, "字幕", 0.68, 0.79)], W, H, fps=30, force_bar=True)
         frame = np.full((H, W, 3), 255, dtype=np.uint8)
-        shown = bar.apply(frame, 30)
-        region = shown[bar.bar_y:bar.bar_y + bar.bar_h]
-        assert bar.bar_y + bar.bar_h == H
-        assert region.max() == 0
+        shown = bar.apply(frame, 0)
+        y0, y1 = int(H * 0.68), int(H * 0.79)
+        assert shown[y0:y1, :20].max() == 0
+        assert shown[:y0 - 1].min() == 255
+        assert shown[y1 + 1:].min() == 255
+
+    def test_ocr_fallback_cover_stays_at_bottom_sixteen_percent(self):
+        bar = CaptionBar([
+            (0.0, 1.0, "高字幕", 0.70, 0.78),
+            (2.0, 3.0, "低字幕", 0.88, 0.96),
+        ], W, H, fps=30, force_bar=True)
+        assert bar.bar_y == int(H * 0.84)
+        assert bar.bar_h == H - bar.bar_y
+        assert bar.safe_top_y == int(H * 0.70)
+
+    def test_ocr_cover_height_is_capped(self):
+        bar = CaptionBar([(0.0, 2.0, "误识别", 0.60, 0.95)], W, H, fps=30, force_bar=True)
+        y0, y1 = bar._entry_bounds(bar.entries[0])
+        assert y1 - y0 <= max(48, int(H * 0.16))
+
+    def test_bottom_stickers_stay_above_ocr_cover(self):
+        pipeline = EffectPipeline(
+            ProcessingOptions(
+                sticker_enabled=True,
+                caption_enabled=True,
+                caption_force_bar=True,
+                caption_ocr_entries=[(0.0, 2.0, "字幕", 0.72, 0.82)],
+            ),
+            np.random.default_rng(3), W, H,
+            fps=30, content_duration=2.0, speed=1.0,
+        )
+        sticker = next(item for item in pipeline.overlays if isinstance(item, StickerOverlay))
+        assert sticker.alpha[int(H * 0.72):].max() == 0
 
     def test_fancy_text_draws(self):
         fancy = FancyText("标题", np.random.default_rng(0), W, H)

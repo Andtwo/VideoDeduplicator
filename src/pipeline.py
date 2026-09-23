@@ -133,11 +133,13 @@ class VideoProcessor(QThread):
             kept_content_frames = total_out_frames - len(drop_positions)
             self.options.caption_time_map = self._build_caption_time_map(
                 total_out_frames, drop_positions, speed)
-            effect_pipeline = EffectPipeline(self.options, rng, width_a, height_a,
-                                              fps=self.fps,
-                                              content_duration=kept_content_frames / self.fps,
-                                              speed=speed)
-            effect_pipeline.set_zoom(randoms["zoom"])
+            effect_pipeline = EffectPipeline(
+                self.options, rng, width_a, height_a,
+                fps=self.fps,
+                content_duration=kept_content_frames / self.fps,
+                speed=speed,
+                zoom_scale=randoms["zoom"],
+            )
             self._report_params(effect_pipeline, speed, randoms["zoom"])
             intro_n = int(round(self.options.intro_duration * self.fps)) if self.options.intro_enabled else 0
             outro_n = int(round(self.options.outro_duration * self.fps)) if self.options.outro_enabled else 0

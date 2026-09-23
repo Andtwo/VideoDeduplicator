@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 from frame_io import looping_frame_reader
@@ -92,6 +93,35 @@ def test_looping_frame_reader_reopens_without_cycle_cache(monkeypatch):
     reader.close()
     assert values == [1, 1, 2, 2, 3]
     assert len(calls) == 3
+
+
+def test_ocr_returns_full_frame_vertical_coordinates():
+    class FakeOCR:
+        def predict(self, _roi):
+            return [{
+                "rec_texts": ["字幕"],
+                "rec_scores": [0.99],
+                "rec_polys": [np.array([[10, 20], [100, 20], [100, 50], [10, 50]])],
+            }]
+
+    frame = np.zeros((1000, 800, 3), dtype=np.uint8)
+    text, top, bottom = ocr_subs._ocr_bottom_entry(FakeOCR(), frame, 0.35)
+    assert text == "字幕"
+    assert top == pytest.approx((650 + 20 - 12) / 1000)
+    assert bottom == pytest.approx((650 + 50 + 12) / 1000)
+
+
+def test_ocr_rejects_oversized_false_positive():
+    class FakeOCR:
+        def predict(self, _roi):
+            return [{
+                "rec_texts": ["C"],
+                "rec_scores": [0.88],
+                "rec_polys": [np.array([[10, 0], [100, 0], [100, 220], [10, 220]])],
+            }]
+
+    frame = np.zeros((1000, 800, 3), dtype=np.uint8)
+    assert ocr_subs._ocr_bottom_entry(FakeOCR(), frame, 0.35) == ("", 0.0, 0.0)
 
 
 def test_ocr_uses_project_models_and_disables_extra_models(monkeypatch):

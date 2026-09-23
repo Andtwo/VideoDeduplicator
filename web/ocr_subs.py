@@ -49,7 +49,7 @@ def _get_ocr():
 
 
 def extract_subtitles(video_path, sample_interval=1.0, bottom_ratio=0.35):
-    """提取底部硬字幕，返回 ``[(start, end, text), ...]``。"""
+    """提取硬字幕，返回 ``(start, end, text, top_ratio, bottom_ratio)``。"""
     duration = _probe_duration(video_path)
     if duration <= 0:
         return []
@@ -60,19 +60,18 @@ def extract_subtitles(video_path, sample_interval=1.0, bottom_ratio=0.35):
         frame = _grab_frame(video_path, t)
         if frame is None:
             break
-        text = _ocr_bottom_text(ocr, frame, bottom_ratio)
-        entries.append((t, min(t + sample_interval, duration), text) if text else None)
+        text, top, bottom = _ocr_bottom_entry(ocr, frame, bottom_ratio)
+        if text:
+            entries.append((t, min(t + sample_interval, duration), text, top, bottom))
         t += sample_interval
 
     merged = []
-    for item in entries:
-        if item is None:
-            continue
-        start, end, text = item
+    for start, end, text, top, bottom in entries:
         if merged and merged[-1][2] == text and abs(merged[-1][1] - start) < 0.01:
-            merged[-1] = (merged[-1][0], end, text)
+            previous = merged[-1]
+            merged[-1] = (previous[0], end, text, min(previous[3], top), max(previous[4], bottom))
         else:
-            merged.append((start, end, text))
+            merged.append((start, end, text, top, bottom))
     return merged
 
 
@@ -100,13 +99,39 @@ def _grab_frame(path, t):
         cap.release()
 
 
-def _ocr_bottom_text(ocr, frame, bottom_ratio):
+def _ocr_bottom_entry(ocr, frame, bottom_ratio):
     height, width = frame.shape[:2]
-    y0 = int(height * (1 - bottom_ratio))
-    result = ocr.predict(frame[y0:height, 0:width])
+    roi_y0 = int(height * (1 - bottom_ratio))
+    result = ocr.predict(frame[roi_y0:height, 0:width])
     texts = []
+    top = height
+    bottom = 0
     for page in result:
-        for text, score in zip(page.get("rec_texts", []), page.get("rec_scores", [])):
-            if score > 0.5:
-                texts.append(text)
-    return " ".join(texts).strip()
+        polygons = page.get("rec_polys", page.get("dt_polys", []))
+        for text, score, polygon in zip(
+            page.get("rec_texts", []), page.get("rec_scores", []), polygons
+        ):
+            ys = [float(point[1]) + roi_y0 for point in polygon]
+            box_top, box_bottom = min(ys), max(ys)
+            box_height = box_bottom - box_top
+            normalized = text.strip()
+            if score <= 0.5 or not normalized:
+                continue
+            if box_height > height * 0.12:
+                continue
+            if len(normalized) == 1 and score < 0.9:
+                continue
+            texts.append(normalized)
+            top = min(top, box_top)
+            bottom = max(bottom, box_bottom)
+    if not texts:
+        return "", 0.0, 0.0
+    padding = max(6, int(height * 0.012))
+    top_ratio = max(0.0, (top - padding) / height)
+    bottom_ratio_value = min(1.0, (bottom + padding) / height)
+    return " ".join(texts).strip(), top_ratio, bottom_ratio_value
+
+
+def _ocr_bottom_text(ocr, frame, bottom_ratio):
+    """兼容旧测试/调用，仅返回文本。"""
+    return _ocr_bottom_entry(ocr, frame, bottom_ratio)[0]
