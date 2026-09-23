@@ -24,9 +24,15 @@ def run_job(job, on_status=None):
     has_audio = bool(job.get("audio_file_path"))
     strategy = job.get("strategy") or generate_strategy(has_audio, has_b, title)
     steps = strategy["steps"]
-    status(f"随机策略: {', '.join(steps)} / 音频={strategy['audio_mode']} / fps={strategy['fps']}")
+    version_label = ""
+    if strategy.get("strategy_name"):
+        version_label = f"[{strategy['strategy_name']} v{strategy.get('strategy_version', 1)}] "
+    status(f"处理策略: {version_label}{', '.join(steps)} / 音频={strategy['audio_mode']} / fps={strategy['fps']}")
 
     opts = ProcessingOptions(reserve_top_left=bool(title))
+    if "speed" in steps:
+        opts.speed_enabled, opts.speed_random = True, False
+        opts.speed_min = opts.speed_max = strategy["speed"]
     if "zoom" in steps:
         opts.zoom_enabled, opts.zoom_random, opts.zoom_min, opts.zoom_max = True, False, strategy["zoom"], strategy["zoom"]
     if "mirror" in steps:

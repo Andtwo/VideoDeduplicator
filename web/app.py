@@ -1,4 +1,5 @@
 """Linux Web 服务入口：单进程持久化队列与受限上传。"""
+import hmac
 import json
 import os
 import re
@@ -10,17 +11,21 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from queue import Empty, Full, Queue
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from web.strategy_store import StrategyStore
 from web.worker import run_job
 
 BASE = Path(__file__).resolve().parent.parent
 UPLOADS = BASE / "uploads"
 OUTPUTS = BASE / "web_outputs"
+WEB_DATA = BASE / "web_data"
 UPLOADS.mkdir(exist_ok=True)
 OUTPUTS.mkdir(exist_ok=True)
+WEB_DATA.mkdir(exist_ok=True)
+STRATEGY_STORE = StrategyStore(WEB_DATA / "strategies.json")
 
 MAX_UPLOAD_BYTES = int(os.getenv("VD_MAX_UPLOAD_MB", "2048")) * 1024 * 1024
 MAX_PENDING_TASKS = int(os.getenv("VD_MAX_PENDING_TASKS", "20"))
@@ -28,6 +33,8 @@ TASK_TTL_SECONDS = int(os.getenv("VD_TASK_TTL_HOURS", "24")) * 3600
 MIN_FREE_BYTES = int(os.getenv("VD_MIN_FREE_GB", "5")) * 1024 * 1024 * 1024
 MAX_TITLE_LENGTH = 80
 CHUNK_SIZE = 1024 * 1024
+ADMIN_TOKEN = os.getenv("VD_ADMIN_TOKEN", "").strip()
+LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 
 _tasks = {}
 _queue = Queue(maxsize=MAX_PENDING_TASKS)
@@ -47,6 +54,8 @@ def _public_task(task):
         "title": task.get("title", ""),
         "created_at": task.get("created_at"),
         "updated_at": task.get("updated_at"),
+        "strategy_name": task.get("strategy_name", ""),
+        "strategy_version": task.get("strategy_version"),
     }
 
 
@@ -184,6 +193,66 @@ def favicon():
     return Response(status_code=204)
 
 
+def _require_admin(request: Request, x_admin_token: str = Header("")):
+    if ADMIN_TOKEN:
+        token = x_admin_token
+        if not token or not hmac.compare_digest(token, ADMIN_TOKEN):
+            raise HTTPException(401, "管理令牌无效")
+        return
+    client_host = request.client.host if request.client else ""
+    if client_host not in LOCAL_HOSTS:
+        raise HTTPException(403, "未配置 VD_ADMIN_TOKEN 时，后台仅允许本机访问")
+
+
+@app.get("/admin/strategies", response_class=HTMLResponse)
+def strategy_admin(request: Request):
+    if not ADMIN_TOKEN:
+        _require_admin(request)
+    html = (Path(__file__).parent / "templates" / "strategy_admin.html").read_text(encoding="utf-8")
+    return html.replace("__ADMIN_TOKEN_REQUIRED__", "true" if ADMIN_TOKEN else "false")
+
+
+@app.get("/api/admin/strategies", dependencies=[])
+def list_strategies(request: Request, x_admin_token: str = Header("")):
+    _require_admin(request, x_admin_token)
+    return {"versions": STRATEGY_STORE.list_versions(), "token_required": bool(ADMIN_TOKEN)}
+
+
+@app.post("/api/admin/strategies", status_code=201)
+async def create_strategy(request: Request, x_admin_token: str = Header("")):
+    _require_admin(request, x_admin_token)
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("请求内容必须是对象")
+        return STRATEGY_STORE.create_version(
+            payload.get("name"), payload.get("description"), payload.get("config")
+        )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/admin/strategies/{version_id}/activate")
+def activate_strategy(version_id: str, request: Request, x_admin_token: str = Header("")):
+    _require_admin(request, x_admin_token)
+    try:
+        return STRATEGY_STORE.activate(version_id)
+    except KeyError as exc:
+        raise HTTPException(404, "策略版本不存在") from exc
+
+
+@app.delete("/api/admin/strategies/{version_id}", status_code=204)
+def delete_strategy(version_id: str, request: Request, x_admin_token: str = Header("")):
+    _require_admin(request, x_admin_token)
+    try:
+        STRATEGY_STORE.delete(version_id)
+    except KeyError as exc:
+        raise HTTPException(404, "策略版本不存在") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return Response(status_code=204)
+
+
 async def _save_upload(upload, path, expected_type, total_size):
     if not upload or not upload.filename:
         return "", total_size
@@ -233,6 +302,11 @@ async def process(
         video_b_path, total_size = await _save_upload(video_b, upload_dir / "b.mp4", "video", total_size)
         audio_path, total_size = await _save_upload(audio_file, upload_dir / "audio.m4a", "audio", total_size)
         output_path = OUTPUTS / f"{task_id}.mp4"
+        strategy = STRATEGY_STORE.snapshot_for_task(
+            has_audio_file=bool(audio_path),
+            has_video_b=bool(video_b_path),
+            title=title,
+        )
         job = {
             "task_id": task_id,
             "title": title,
@@ -241,7 +315,7 @@ async def process(
             "audio_file_path": audio_path,
             "output_path": str(output_path),
             "temp_dir": str(upload_dir / "tmp"),
-            "strategy": None,
+            "strategy": strategy,
         }
         now = time.time()
         task = {
@@ -251,6 +325,9 @@ async def process(
             "output": "",
             "title": title,
             "download_name": _safe_download_name(title),
+            "strategy_version_id": strategy["strategy_version_id"],
+            "strategy_name": strategy["strategy_name"],
+            "strategy_version": strategy["strategy_version"],
             "created_at": now,
             "updated_at": now,
             "job": job,

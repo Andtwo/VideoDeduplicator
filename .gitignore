@@ -11,4 +11,5 @@ telemetry-server/data/
 uploads/
 web_outputs/
 web_test_results/
+web_data/
 venv_web/

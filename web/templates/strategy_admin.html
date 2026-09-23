@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>处理策略后台 - VideoDeduplicator</title>
+<style>
+:root{--bg:#090c12;--surface:#10151e;--surface2:#151b25;--line:#283142;--text:#e9edf4;--muted:#8e98aa;--accent:#5eead4;--danger:#f97066;--warning:#f4c66a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;min-height:100dvh}button,input,select,textarea{font:inherit}.shell{max-width:1440px;margin:auto;padding:24px}.topbar{height:64px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);margin-bottom:24px}.brand{font-size:18px;font-weight:650}.brand small{display:block;font-size:12px;font-weight:400;color:var(--muted);margin-top:3px}.layout{display:grid;grid-template-columns:340px minmax(0,1fr);gap:20px}.panel{min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:8px}.side{height:calc(100dvh - 136px);min-height:620px;display:flex;flex-direction:column}.panel-head{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}.panel-head h2{font-size:14px;margin:0}.versions{padding:8px;overflow:auto}.version{width:100%;text-align:left;background:transparent;color:var(--text);border:1px solid transparent;border-radius:6px;padding:13px 12px;cursor:pointer;margin-bottom:4px}.version:hover,.version.selected{background:var(--surface2);border-color:var(--line)}.version-line{display:flex;align-items:center;justify-content:space-between;gap:8px}.version-name{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.version-meta{font-size:11px;color:var(--muted);margin-top:7px}.active{color:var(--accent);font-size:11px}.workspace{padding:22px}.summary{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:24px}.field{min-width:0;display:flex;flex-direction:column;gap:7px}.field label,.group-title{font-size:12px;color:var(--muted)}input[type=text],input[type=number],textarea,select{width:100%;border:1px solid var(--line);background:var(--surface2);color:var(--text);border-radius:6px;padding:10px 11px;outline:none}input:focus,textarea:focus,select:focus{border-color:var(--accent)}textarea{resize:vertical;min-height:74px}.section{border-top:1px solid var(--line);padding:20px 0}.section:first-of-type{border-top:0}.section h3{font-size:14px;margin:0 0 15px}.checks{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:8px}.check{display:flex;gap:9px;align-items:center;background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:10px 11px;font-size:13px;cursor:pointer}.check:has(input:checked){border-color:#417d75;background:#13221f}.check input{accent-color:var(--accent)}.grid{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:14px}.range{display:grid;grid-template-columns:1fr 1fr;gap:8px}.actions{display:flex;justify-content:flex-end;gap:10px;padding-top:20px;border-top:1px solid var(--line)}.btn{border:1px solid var(--line);background:var(--surface2);color:var(--text);border-radius:6px;padding:9px 14px;cursor:pointer;white-space:nowrap}.btn:hover{border-color:#526076}.btn.primary{background:var(--accent);border-color:var(--accent);color:#07110f;font-weight:650}.btn.danger{color:var(--danger)}.btn:disabled{opacity:.4;cursor:not-allowed}.notice{display:none;margin-bottom:16px;padding:11px 13px;border:1px solid var(--line);border-radius:6px;font-size:13px}.notice.ok{display:block;color:var(--accent);border-color:#28594f}.notice.error{display:block;color:var(--danger);border-color:#633832}.token{position:fixed;inset:0;background:rgba(5,8,12,.88);display:none;align-items:center;justify-content:center}.token.open{display:flex}.token-box{width:min(420px,calc(100% - 32px));background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:24px}.token-box h2{font-size:17px;margin:0 0 8px}.token-box p{color:var(--muted);font-size:13px;line-height:1.6;margin:0 0 18px}.token-box .btn{width:100%;margin-top:12px}.mode-note{font-size:12px;color:var(--muted);margin-top:8px}@media(max-width:900px){.shell{padding:14px}.layout{grid-template-columns:minmax(0,1fr)}.side{height:auto;min-height:0;max-height:340px}.summary,.grid{grid-template-columns:1fr 1fr}.checks{grid-template-columns:1fr 1fr}}@media(max-width:560px){.summary,.grid,.checks{grid-template-columns:1fr}.topbar{height:auto;padding:12px 0}.topbar .btn{display:none}.actions{flex-direction:column}.actions .btn{width:100%}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header class="topbar"><div class="brand">VideoDeduplicator<small>内容处理策略后台</small></div><a class="btn" href="/">返回用户端</a></header>
+<main class="layout">
+<aside class="panel side"><div class="panel-head"><h2>策略版本</h2><button class="btn" id="newBtn" type="button">新建</button></div><div class="versions" id="versions"></div></aside>
+<section class="panel workspace">
+<div class="notice" id="notice"></div>
+<div class="summary">
+<div class="field"><label for="name">策略名称</label><input id="name" type="text" maxlength="60" placeholder="例如：剧情号稳定版"></div>
+<div class="field"><label for="mode">步骤选择方式</label><select id="mode"><option value="random">从候选步骤随机</option><option value="fixed">固定执行已选步骤</option></select></div>
+<div class="field" style="grid-column:1/-1"><label for="description">版本说明</label><textarea id="description" maxlength="300" placeholder="记录本版本的使用场景和调整原因"></textarea></div>
+</div>
+<div class="section"><h3>画面处理步骤</h3><div class="checks" id="steps"></div><div class="mode-note">至少选择 3 项。镜像会自动在第一步执行，并强制追加 OCR 字幕遮挡。</div></div>
+<div class="section"><h3>随机与输出</h3><div class="grid">
+<div class="field"><label>随机步骤数</label><div class="range"><input id="minSteps" type="number" min="3" max="12"><input id="maxSteps" type="number" min="3" max="12"></div></div>
+<div class="field"><label>输出帧率</label><div class="checks" id="fps"></div></div>
+<div class="field"><label>音频模式</label><div class="checks" id="audio"></div></div>
+<div class="field"><label>每秒删帧数量</label><div class="range"><input id="dropMin" type="number" min="1" max="3"><input id="dropMax" type="number" min="1" max="3"></div></div>
+</div></div>
+<div class="section"><h3>效果参数范围</h3><div class="grid">
+<div class="field"><label>缩放比例</label><div class="range"><input id="zoomMin" type="number" min="1" max="1.5" step="0.01"><input id="zoomMax" type="number" min="1" max="1.5" step="0.01"></div></div>
+<div class="field"><label>播放速度</label><div class="range"><input id="speedMin" type="number" min="0.5" max="2" step="0.01"><input id="speedMax" type="number" min="0.5" max="2" step="0.01"></div></div>
+<div class="field"><label>片头时长（秒）</label><div class="range"><input id="introMin" type="number" min="0" max="5" step="0.1"><input id="introMax" type="number" min="0" max="5" step="0.1"></div></div>
+<div class="field"><label>片尾时长（秒）</label><div class="range"><input id="outroMin" type="number" min="0" max="5" step="0.1"><input id="outroMax" type="number" min="0" max="5" step="0.1"></div></div>
+<div class="field"><label>滤镜候选</label><div class="checks" id="filters"></div></div>
+<div class="field" style="grid-column:span 2"><label>特效候选</label><div class="checks" id="effects"></div></div>
+</div></div>
+<div class="actions"><button class="btn danger" id="deleteBtn" type="button">删除所选版本</button><button class="btn" id="activateBtn" type="button">启用所选版本</button><button class="btn primary" id="saveBtn" type="button">保存为新版本</button></div>
+</section>
+</main>
+</div>
+<div class="token" id="tokenDialog"><div class="token-box"><h2>后台访问验证</h2><p>输入服务端配置的管理令牌。令牌仅保存在当前浏览器会话中。</p><div class="field"><label for="tokenInput">管理令牌</label><input id="tokenInput" type="text" autocomplete="off"></div><button class="btn primary" id="tokenBtn" type="button">进入后台</button></div></div>
+<script>
+const STEP_LABELS={zoom:'画面缩放',mirror:'水平镜像',filter:'滤镜',fx:'画面特效',sticker:'贴图',fancy:'花字',progress:'进度条',caption_bar:'字幕遮挡',drop_frames:'真实删帧',speed:'播放变速',intro:'片头',outro:'片尾'};
+const AUDIO_LABELS={original:'保留原声',voice_change:'简单变声',replace_bgm:'替换 BGM'};
+const FILTER_LABELS={warm:'暖色',cool:'冷色',vintage:'复古',mono:'黑白',bright:'明亮'};
+const FX_LABELS={grain:'颗粒',vignette:'暗角',bloom:'柔光',leak:'漏光'};
+const DEFAULT={selection_mode:'random',steps:Object.keys(STEP_LABELS).filter(step=>step!=='speed'),min_steps:3,max_steps:6,audio_modes:Object.keys(AUDIO_LABELS),fps_options:[30,60,120],drop_min:1,drop_max:3,zoom_min:1.1,zoom_max:1.2,speed_min:1.05,speed_max:1.2,filter_styles:Object.keys(FILTER_LABELS),fx_styles:Object.keys(FX_LABELS),intro_min:.8,intro_max:1.5,outro_min:.8,outro_max:1.2};
+const TOKEN_REQUIRED=__ADMIN_TOKEN_REQUIRED__;
+let versions=[],selectedId=null,token=sessionStorage.getItem('vd_admin_token')||'';
+const $=id=>document.getElementById(id),notice=$('notice');
+function checks(id,items){$(id).innerHTML=Object.entries(items).map(([value,label])=>`<label class="check"><input type="checkbox" value="${value}"><span>${label}</span></label>`).join('')}
+checks('steps',STEP_LABELS);checks('audio',AUDIO_LABELS);checks('filters',FILTER_LABELS);checks('effects',FX_LABELS);checks('fps',{'30':'30 FPS','60':'60 FPS','120':'120 FPS'});
+function headers(){return token?{'X-Admin-Token':token}:{}}
+function message(text,type='ok'){notice.textContent=text;notice.className='notice '+type;setTimeout(()=>{notice.className='notice'},3500)}
+async function api(path,options={}){options.headers={...headers(),...(options.headers||{})};const r=await fetch(path,options);if(r.status===401){$('tokenDialog').classList.add('open');throw new Error('请输入有效的管理令牌')}if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.detail||'请求失败')}return r.status===204?null:r.json()}
+function setChecked(id,values){const set=new Set(values.map(String));$(id).querySelectorAll('input').forEach(input=>input.checked=set.has(input.value))}
+function values(id){return [...$(id).querySelectorAll('input:checked')].map(input=>input.value)}
+function fill(config=DEFAULT){$('mode').value=config.selection_mode;$('minSteps').value=config.min_steps;$('maxSteps').value=config.max_steps;$('dropMin').value=config.drop_min;$('dropMax').value=config.drop_max;$('zoomMin').value=config.zoom_min;$('zoomMax').value=config.zoom_max;$('speedMin').value=config.speed_min;$('speedMax').value=config.speed_max;$('introMin').value=config.intro_min;$('introMax').value=config.intro_max;$('outroMin').value=config.outro_min;$('outroMax').value=config.outro_max;setChecked('steps',config.steps);setChecked('audio',config.audio_modes);setChecked('fps',config.fps_options);setChecked('filters',config.filter_styles);setChecked('effects',config.fx_styles);syncMode()}
+function config(){return{selection_mode:$('mode').value,steps:values('steps'),min_steps:+$('minSteps').value,max_steps:+$('maxSteps').value,audio_modes:values('audio'),fps_options:values('fps').map(Number),drop_min:+$('dropMin').value,drop_max:+$('dropMax').value,zoom_min:+$('zoomMin').value,zoom_max:+$('zoomMax').value,speed_min:+$('speedMin').value,speed_max:+$('speedMax').value,filter_styles:values('filters'),fx_styles:values('effects'),intro_min:+$('introMin').value,intro_max:+$('introMax').value,outro_min:+$('outroMin').value,outro_max:+$('outroMax').value}}
+function syncMode(){const fixed=$('mode').value==='fixed';$('minSteps').disabled=fixed;$('maxSteps').disabled=fixed}
+function render(){if(!versions.length){$('versions').innerHTML='<div class="version-meta" style="padding:16px">暂无策略版本</div>';return}$('versions').innerHTML=versions.map(v=>`<button class="version ${v.id===selectedId?'selected':''}" data-id="${v.id}"><div class="version-line"><span class="version-name">${escapeHtml(v.name)} v${v.version}</span>${v.active?'<span class="active">当前启用</span>':''}</div><div class="version-meta">${new Date(v.created_at*1000).toLocaleString()}</div></button>`).join('');$('versions').querySelectorAll('button').forEach(button=>button.onclick=()=>select(button.dataset.id))}
+function escapeHtml(value){const node=document.createElement('span');node.textContent=value;return node.innerHTML}
+function select(id){const v=versions.find(item=>item.id===id);if(!v)return;selectedId=id;$('name').value=v.name;$('description').value=v.description||'';fill(v.config);$('activateBtn').disabled=v.active;$('deleteBtn').disabled=v.active;render()}
+async function load(){try{const data=await api('/api/admin/strategies');notice.className='notice';notice.textContent='';versions=data.versions;const preferred=versions.find(v=>v.id===selectedId)||versions.find(v=>v.active)||versions[0];if(preferred)select(preferred.id)}catch(error){message(error.message,'error')}}
+$('mode').onchange=syncMode;
+$('newBtn').onclick=()=>{selectedId=null;$('name').value='';$('description').value='';fill(DEFAULT);$('activateBtn').disabled=true;$('deleteBtn').disabled=true;render();$('name').focus()};
+$('saveBtn').onclick=async()=>{try{const created=await api('/api/admin/strategies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('name').value,description:$('description').value,config:config()})});selectedId=created.id;await load();message(`已保存 ${created.name} v${created.version}`)}catch(error){message(error.message,'error')}};
+$('activateBtn').onclick=async()=>{if(!selectedId)return;try{await api(`/api/admin/strategies/${selectedId}/activate`,{method:'POST'});await load();message('策略版本已启用，仅影响之后提交的新任务')}catch(error){message(error.message,'error')}};
+$('deleteBtn').onclick=async()=>{if(!selectedId||!confirm('确定删除所选策略版本吗？'))return;try{await api(`/api/admin/strategies/${selectedId}`,{method:'DELETE'});selectedId=null;await load();message('策略版本已删除')}catch(error){message(error.message,'error')}};
+$('tokenBtn').onclick=()=>{token=$('tokenInput').value.trim();sessionStorage.setItem('vd_admin_token',token);$('tokenDialog').classList.remove('open');load()};
+$('tokenInput').onkeydown=e=>{if(e.key==='Enter')$('tokenBtn').click()};
+if(TOKEN_REQUIRED&&!token){$('tokenDialog').classList.add('open')}else{load()}
+</script>
+</body>
+</html>
