@@ -38,7 +38,7 @@ def run_job(job, on_status=None):
     if "sticker" in steps:
         opts.sticker_enabled = True
     if "fancy" in steps:
-        opts.fancy_enabled, opts.fancy_text = True, title or "VideoDeduplicator"
+        opts.fancy_enabled, opts.fancy_text = True, "精彩片段"
     if "progress" in steps:
         opts.progress_enabled = True
     if "intro" in steps:
@@ -126,7 +126,7 @@ class WebVideoProcessor(QtVideoProcessor):
 
     def _postprocess_frame(self, frame):
         if self._title_overlay and self._title_overlay.enabled:
-            if self._title_overlay.w == 0:
+            if not self._title_overlay.ready:
                 h, w = frame.shape[:2]
                 self._title_overlay = TitleOverlay(self._title_overlay.title, w, h)
             return self._title_overlay.apply(frame)

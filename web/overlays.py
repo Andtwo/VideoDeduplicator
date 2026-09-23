@@ -12,8 +12,11 @@ class TitleOverlay:
     """左上角半透明底条 + 影视名称文字。"""
 
     def __init__(self, title, width, height):
-        self.enabled = bool(title.strip())
-        if not self.enabled:
+        self.title = title.strip()
+        self.enabled = bool(self.title)
+        self.ready = self.enabled and width > 0 and height > 0
+        self.w = 0
+        if not self.ready:
             return
         font_size = max(18, int(height * 0.05))
         font = load_font(font_size)
@@ -26,11 +29,10 @@ class TitleOverlay:
         self.w = tw + pad * 2
         self.h = th + pad * 2
         self.pad = pad
-        self.title = title
         self.font = font
 
     def apply(self, frame):
-        if not self.enabled:
+        if not self.ready:
             return frame
         x0, y0 = self.x0, self.y0
         x1 = min(frame.shape[1], x0 + self.w)

@@ -11,6 +11,60 @@ from fastapi.testclient import TestClient
 from frame_io import looping_frame_reader
 from web import app as web_app
 from web import ocr_subs
+from web.overlays import TitleOverlay
+from web.worker import WebVideoProcessor, run_job
+
+
+def test_title_overlay_defers_layout_until_frame_size_is_known():
+    overlay = TitleOverlay("老九门", 0, 0)
+    assert overlay.enabled
+    assert not overlay.ready
+    assert overlay.w == 0
+
+
+def test_web_processor_initializes_title_from_real_frame_size():
+    class ProcessorStub:
+        _postprocess_frame = WebVideoProcessor._postprocess_frame
+
+    processor = ProcessorStub()
+    processor._title_overlay = TitleOverlay("老九门", 0, 0)
+    frame = np.full((1080, 1920, 3), 180, dtype=np.uint8)
+    output = processor._postprocess_frame(frame.copy())
+    assert processor._title_overlay.ready
+    assert processor._title_overlay.font.size == 54
+    assert processor._title_overlay.w > 100
+    assert processor._title_overlay.x0 == 57
+    assert not np.array_equal(output[40:130, 50:300], frame[40:130, 50:300])
+
+
+def test_fancy_text_does_not_duplicate_movie_title(monkeypatch, tmp_path):
+    captured = {}
+
+    class ProcessorStub:
+        def __init__(self, *_args):
+            captured["options"] = _args[5]
+            self.failure = ""
+
+        def run(self):
+            Path(tmp_path / "out.mp4").write_bytes(b"video")
+
+    monkeypatch.setattr("web.worker.WebVideoProcessor", ProcessorStub)
+    job = {
+        "title": "老九门",
+        "video_a_path": "a.mp4",
+        "video_b_path": "",
+        "audio_file_path": "",
+        "output_path": str(tmp_path / "out.mp4"),
+        "temp_dir": str(tmp_path / "tmp"),
+        "strategy": {
+            "steps": ["fancy", "zoom", "progress"],
+            "audio_mode": "original",
+            "fps": 30,
+            "zoom": 1.1,
+        },
+    }
+    run_job(job)
+    assert captured["options"].fancy_text == "精彩片段"
 
 
 def test_looping_frame_reader_reopens_without_cycle_cache(monkeypatch):
