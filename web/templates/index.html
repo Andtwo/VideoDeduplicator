@@ -31,8 +31,8 @@ input[type=text]:focus{border-color:var(--accent)}
 <div class="sub">随机处理策略 · 至少 3 个画面步骤 · 自动压制字幕条</div>
 <form id="f">
 <div class="field"><label>内容视频 A（必填）</label><input type="file" name="video_a" accept="video/*" required></div>
-<div class="field"><label>素材视频 B（可选）</label><input type="file" name="video_b" accept="video/*"></div>
-<div class="field"><label>音频文件（可选，用于 BGM 替换）</label><input type="file" name="audio_file" accept="audio/*"></div>
+<div class="field" hidden><label>素材视频 B（可选）</label><input type="file" name="video_b" accept="video/*"></div>
+<div class="field" hidden><label>音频文件（可选，用于 BGM 替换）</label><input type="file" name="audio_file" accept="audio/*"></div>
 <div class="field"><label>影视名称（可选）</label><input type="text" name="title" placeholder="例如：今天跟闺蜜吃烤肉自助餐喽"></div>
 <button class="btn" type="submit">开始处理</button>
 </form>
