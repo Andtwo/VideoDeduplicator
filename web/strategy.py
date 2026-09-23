@@ -64,8 +64,9 @@ def validate_strategy_config(raw):
     max_steps = int(config.get("max_steps", MAX_STEPS))
     if mode == "fixed":
         min_steps = max_steps = len(steps)
-    elif not MIN_STEPS <= min_steps <= max_steps <= len(steps):
-        raise ValueError("随机步骤数量必须在已选步骤范围内，且至少为 3")
+    else:
+        max_steps = max(MIN_STEPS, min(max_steps, len(steps)))
+        min_steps = max(MIN_STEPS, min(min_steps, max_steps))
 
     audio_modes = list(dict.fromkeys(config.get("audio_modes") or []))
     if not audio_modes or set(audio_modes) - set(AUDIO_MODES):

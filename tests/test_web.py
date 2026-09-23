@@ -42,6 +42,20 @@ def test_strategy_config_fixed_mode_and_input_capabilities():
     assert strategy["fps"] == 30
 
 
+def test_random_step_range_is_clamped_to_selected_candidates():
+    config = validate_strategy_config({
+        **DEFAULT_CONFIG,
+        "selection_mode": "random",
+        "steps": ["zoom", "fancy", "drop_frames"],
+        "min_steps": 3,
+        "max_steps": 6,
+    })
+    assert config["min_steps"] == 3
+    assert config["max_steps"] == 3
+    strategy = generate_strategy(config=config)
+    assert set(strategy["steps"]) == {"zoom", "fancy", "drop_frames"}
+
+
 def test_strategy_config_requires_three_steps():
     with pytest.raises(ValueError, match="至少选择 3"):
         validate_strategy_config({**DEFAULT_CONFIG, "steps": ["zoom", "fx"]})
