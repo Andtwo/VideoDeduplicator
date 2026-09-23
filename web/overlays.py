@@ -18,7 +18,7 @@ class TitleOverlay:
         self.w = 0
         if not self.ready:
             return
-        font_size = max(18, int(height * 0.05))
+        font_size = max(24, int(height * 0.08))
         font = load_font(font_size)
         pad = max(6, font_size // 3)
         probe = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
