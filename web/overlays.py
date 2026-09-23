@@ -39,11 +39,7 @@ class TitleOverlay:
         y1 = min(frame.shape[0], y0 + self.h)
         if x1 <= x0 or y1 <= y0:
             return frame
-        # 半透明底
-        region = frame[y0:y1, x0:x1].astype(np.float32)
-        region = region * 0.55
-        frame[y0:y1, x0:x1] = region.astype(np.uint8)
-        # 文字
+        # 仅绘制文字，保持原画面完全透明
         img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         d = ImageDraw.Draw(img)
         d.text((x0 + self.pad, y0 + self.pad), self.title,
