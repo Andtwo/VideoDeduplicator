@@ -190,32 +190,59 @@ class LeakFx:
 class StickerOverlay:
     """四角贴纸：初始化时随机选图、随机大小与位置，预合成 RGBA 层。"""
 
-    def __init__(self, rng, width, height, bottom_safe_y=None, reserve_top_left=False):
+    def __init__(self, rng, width, height, bottom_safe_y=None, reserve_top_left=False,
+                 layout="corners"):
+        if layout not in ("corners", "horizontal_bar", "vertical_bars"):
+            raise ValueError("贴纸布局无效")
         rgb = np.zeros((height, width, 3), dtype=np.float32)
         alpha = np.zeros((height, width), dtype=np.float32)
-        corners = [(1, 0), (0, 1), (1, 1)] if reserve_top_left else [(0, 0), (1, 0), (0, 1), (1, 1)]
-        for corner_x, corner_y in corners:
-            size = int(width * rng.uniform(0.055, 0.11))
+        if layout == "horizontal_bar":
+            positions = [(int(width * i / 6), int(height * 0.02)) for i in range(6)]
+            sizes = [max(24, int(height * 0.11))] * len(positions)
+        elif layout == "vertical_bars":
+            positions = [(int(width * 0.015), int(height * i / 5)) for i in range(1, 5)]
+            positions += [(int(width * 0.985), int(height * i / 5)) for i in range(1, 5)]
+            sizes = [max(24, int(width * 0.10))] * len(positions)
+        else:
+            corners = [(1, 0), (0, 1), (1, 1)] if reserve_top_left else [(0, 0), (1, 0), (0, 1), (1, 1)]
+            positions = corners
+            sizes = None
+        for position_index, position in enumerate(positions):
+            if layout == "corners":
+                corner_x, corner_y = position
+            else:
+                corner_x = corner_y = None
+            if sizes is not None:
+                size = sizes[position_index]
+            else:
+                size = int(width * rng.uniform(0.055, 0.11))
             sticker = get_sticker(rng.choice(STICKER_KINDS), size)
             sticker = sticker.rotate(rng.uniform(-18, 18), expand=True, resample=Image_BICUBIC)
             sw, sh = sticker.size
-            # 角落内随机偏移，避免贴纸超出画面
-            max_dx, max_dy = width // 6, height // 6
-            if corner_x == 0:
-                x0 = int(rng.integers(int(width * 0.015), max(1, max_dx)))
+            # 条带布局使用固定槽位；四角布局使用原有随机位置
+            if layout == "horizontal_bar":
+                x0, y0 = position
+            elif layout == "vertical_bars":
+                x0, y0 = position
+                x0 = max(0, min(width - sw, x0 - (sw if x0 > width // 2 else 0)))
+                y0 = max(0, min(height - sh, y0 - sh // 2))
             else:
-                x0 = int(rng.integers(width - max_dx - sw, max(width - sw - int(width * 0.015), 1)))
-            if corner_y == 0:
-                y0 = int(rng.integers(int(height * 0.015), max(1, max_dy)))
-            else:
-                lower_bound = height - max_dy - sh
-                upper_bound = height - sh - int(height * 0.015)
-                if bottom_safe_y is not None:
-                    upper_bound = min(upper_bound, bottom_safe_y - sh - int(height * 0.015))
-                    lower_bound = min(lower_bound, upper_bound)
-                y0 = int(rng.integers(lower_bound, max(lower_bound + 1, upper_bound + 1)))
-            x0 = max(0, min(x0, width - sw))
-            y0 = max(0, min(y0, height - sh))
+                max_dx, max_dy = width // 6, height // 6
+                if corner_x == 0:
+                    x0 = int(rng.integers(int(width * 0.015), max(1, max_dx)))
+                else:
+                    x0 = int(rng.integers(width - max_dx - sw, max(width - sw - int(width * 0.015), 1)))
+                if corner_y == 0:
+                    y0 = int(rng.integers(int(height * 0.015), max(1, max_dy)))
+                else:
+                    lower_bound = height - max_dy - sh
+                    upper_bound = height - sh - int(height * 0.015)
+                    if bottom_safe_y is not None:
+                        upper_bound = min(upper_bound, bottom_safe_y - sh - int(height * 0.015))
+                        lower_bound = min(lower_bound, upper_bound)
+                    y0 = int(rng.integers(lower_bound, max(lower_bound + 1, upper_bound + 1)))
+            x0 = max(0, min(width - sw, x0))
+            y0 = max(0, min(height - sh, y0))
             arr = np.asarray(sticker, dtype=np.float32)
             a = arr[..., 3] / 255.0
             # alpha-in（避免贴纸相互覆盖时出现硬边）
@@ -422,7 +449,7 @@ class ProgressBarOverlay:
 
     def __init__(self, width, height, color=(226, 144, 74)):  # BGR 主题蓝
         self.width = width
-        self.bar_h = max(4, height // 210)
+        self.bar_h = max(8, height // 105)
         self.track_y = height - self.bar_h - max(3, height // 300)
         self.color = np.array(color, dtype=np.float32)
 
@@ -479,6 +506,7 @@ class EffectPipeline:
                 rng, width, height,
                 bottom_safe_y=bottom_safe_y,
                 reserve_top_left=options.reserve_top_left,
+                layout=options.sticker_layout,
             ))
         if caption_overlay is not None:
             self.overlays.append(caption_overlay)

@@ -45,6 +45,8 @@ def run_job(job, on_status=None):
         opts.fx_enabled, opts.fx_style, opts.fx_strength = True, strategy["fx_style"], 0.25
     if "sticker" in steps:
         opts.sticker_enabled = True
+        opts.sticker_layout = strategy.get("sticker_layout", "corners")
+    opts.aspect_ratio = strategy.get("aspect_ratio", "source")
     if "fancy" in steps:
         opts.fancy_enabled, opts.fancy_text = True, "精彩片段"
     if "progress" in steps:

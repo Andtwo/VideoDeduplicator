@@ -8,6 +8,7 @@ def frame_reader(video_path, width, height):
     """按帧读取视频，生成 BGR numpy 帧（不做缩放，要求与声明分辨率一致）。"""
     command = [
         'ffmpeg', '-i', video_path,
+        '-vf', f'scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2',
         '-f', 'image2pipe', '-pix_fmt', 'bgr24', '-vcodec', 'rawvideo', '-'
     ]
     creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0

@@ -67,6 +67,19 @@ def has_audio_stream(video_path):
         return False
 
 
+def aspect_dimensions(width, height, aspect_ratio):
+    """按目标画幅计算输出尺寸，限制在输入尺寸范围内并保持偶数尺寸。"""
+    if aspect_ratio == "source":
+        return width, height
+    ratios = {"4:3": 4 / 3, "16:9": 16 / 9, "9:16": 9 / 16}
+    target = ratios[aspect_ratio]
+    if width / height >= target:
+        out_width, out_height = int(round(height * target)), height
+    else:
+        out_width, out_height = width, int(round(width / target))
+    return max(2, out_width - out_width % 2), max(2, out_height - out_height % 2)
+
+
 def resize_video(input_path, output_path, width, height, use_gpu=False):
     """将视频缩放并填充到目标分辨率。"""
     if not os.path.exists(input_path):

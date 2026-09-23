@@ -38,8 +38,9 @@ class ProcessingOptions:
     fx_style: str = "random"
     fx_strength: float = 0.12
 
-    # ⑧ 四角贴纸（四角随机贴纸，大小随机）
+    # ⑧ 贴纸布局：四角、顶部横条、左右竖条
     sticker_enabled: bool = False
+    sticker_layout: str = "corners"
 
     # ⑤ 音频：BGM 替换 / 混音 / 配音替换
     audio_mode: str = "original"
@@ -59,6 +60,9 @@ class ProcessingOptions:
     outro_enabled: bool = False
     outro_text: str = ""
     outro_duration: float = 1.0  # 秒
+
+    # Web 版扩展：输出画幅
+    aspect_ratio: str = "source"
 
     # Web 版扩展：删帧（模式 B：真实删除，视频变短）
     drop_enabled: bool = False
