@@ -6,6 +6,8 @@ VISUAL_STEPS = [
     "fancy", "progress", "caption_bar", "drop_frames", "speed",
     "intro", "outro",
 ]
+ASPECT_RATIOS = ["source", "4:3", "16:9", "9:16"]
+STICKER_LAYOUTS = ["corners", "horizontal_bar", "vertical_bars"]
 AUDIO_MODES = ["original", "voice_change", "replace_bgm"]
 FILTER_STYLES = ["warm", "cool", "vintage", "mono", "bright"]
 FX_STYLES = ["grain", "vignette", "bloom", "leak"]
@@ -34,6 +36,8 @@ DEFAULT_CONFIG = {
     "intro_max": 1.5,
     "outro_min": 0.8,
     "outro_max": 1.2,
+    "aspect_ratio": "source",
+    "sticker_layout": "corners",
 }
 
 
@@ -89,6 +93,12 @@ def validate_strategy_config(raw):
     speed_min, speed_max = _bounded_pair(config, "speed_min", "speed_max", 0.5, 2.0, "播放速度")
     intro_min, intro_max = _bounded_pair(config, "intro_min", "intro_max", 0.0, 5.0, "片头时长")
     outro_min, outro_max = _bounded_pair(config, "outro_min", "outro_max", 0.0, 5.0, "片尾时长")
+    aspect_ratio = str(config.get("aspect_ratio", "source"))
+    if aspect_ratio not in ASPECT_RATIOS:
+        raise ValueError("输出画幅必须是原画幅、4:3、16:9 或 9:16")
+    sticker_layout = str(config.get("sticker_layout", "corners"))
+    if sticker_layout not in STICKER_LAYOUTS:
+        raise ValueError("贴纸布局配置无效")
 
     filter_styles = list(dict.fromkeys(config.get("filter_styles") or []))
     filter_strength = float(config.get("filter_strength", 1.0))
@@ -120,6 +130,8 @@ def validate_strategy_config(raw):
         "intro_max": round(intro_max, 1),
         "outro_min": round(outro_min, 1),
         "outro_max": round(outro_max, 1),
+        "aspect_ratio": aspect_ratio,
+        "sticker_layout": sticker_layout,
     }
 
 
@@ -159,5 +171,7 @@ def generate_strategy(has_audio_file=False, has_video_b=False, title="", rng=Non
         "fx_style": rng.choice(config["fx_styles"]) if "fx" in steps else None,
         "intro_duration": round(rng.uniform(config["intro_min"], config["intro_max"]), 1) if "intro" in steps else 0,
         "outro_duration": round(rng.uniform(config["outro_min"], config["outro_max"]), 1) if "outro" in steps else 0,
+        "aspect_ratio": config["aspect_ratio"],
+        "sticker_layout": config["sticker_layout"],
     }
     return strategy

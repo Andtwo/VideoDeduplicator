@@ -17,7 +17,7 @@ import numpy as np
 
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from media import get_video_info, resize_video, has_audio_stream
+from media import get_video_info, resize_video, has_audio_stream, aspect_dimensions
 from frame_io import frame_reader, looping_frame_reader, resampled_frame_reader
 from config import ProcessingOptions
 from effects import EffectPipeline, ProgressBarOverlay
@@ -104,8 +104,12 @@ class VideoProcessor(QThread):
                 os.makedirs(self.temp_dir)
             self.status.emit(f"开始处理，检查视频信息... (t={time.time() - start_time:.2f}s)")
             self.progress.emit(5)
-            width_a, height_a, fps_a, duration_a, total_frames_a = get_video_info(self.video_a_path)
-            self.status.emit(f"视频A信息: {width_a}x{height_a}, {fps_a:.2f}fps, {duration_a:.2f}s, {total_frames_a}帧")
+            source_width, source_height, fps_a, duration_a, total_frames_a = get_video_info(self.video_a_path)
+            width_a, height_a = aspect_dimensions(
+                source_width, source_height, getattr(self.options, "aspect_ratio", "source"))
+            self.status.emit(f"视频A信息: {source_width}x{source_height}, {fps_a:.2f}fps, {duration_a:.2f}s, {total_frames_a}帧")
+            if (width_a, height_a) != (source_width, source_height):
+                self.status.emit(f"输出画幅: {self.options.aspect_ratio} ({width_a}x{height_a})")
             has_b = bool(self.video_b_path)
             if has_b:
                 width_b, height_b, _, _, _ = get_video_info(self.video_b_path)

@@ -14,6 +14,7 @@ from web import app as web_app
 from web import ocr_subs
 from web.overlays import TitleOverlay
 from web.strategy import DEFAULT_CONFIG, generate_strategy, validate_strategy_config
+from media import aspect_dimensions
 from web.strategy_store import StrategyStore
 from web.worker import WebVideoProcessor, run_job
 
@@ -54,6 +55,24 @@ def test_random_step_range_is_clamped_to_selected_candidates():
     assert config["max_steps"] == 3
     strategy = generate_strategy(config=config)
     assert set(strategy["steps"]) == {"zoom", "fancy", "drop_frames"}
+
+
+def test_strategy_snapshot_includes_aspect_ratio_and_sticker_layout():
+    config = validate_strategy_config({
+        **DEFAULT_CONFIG,
+        "aspect_ratio": "9:16",
+        "sticker_layout": "vertical_bars",
+    })
+    strategy = generate_strategy(config=config)
+    assert strategy["aspect_ratio"] == "9:16"
+    assert strategy["sticker_layout"] == "vertical_bars"
+
+
+def test_aspect_dimensions_keep_even_dimensions():
+    assert aspect_dimensions(1920, 1080, "16:9") == (1920, 1080)
+    assert aspect_dimensions(1920, 1080, "4:3") == (1440, 1080)
+    assert aspect_dimensions(1080, 1920, "16:9") == (1080, 608)
+    assert aspect_dimensions(1080, 1920, "9:16") == (1080, 1920)
 
 
 def test_strategy_snapshot_includes_filter_strength():
