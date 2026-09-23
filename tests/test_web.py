@@ -56,6 +56,25 @@ def test_random_step_range_is_clamped_to_selected_candidates():
     assert set(strategy["steps"]) == {"zoom", "fancy", "drop_frames"}
 
 
+def test_strategy_ranges_swap_and_accept_zoom_percentages():
+    reversed_config = validate_strategy_config({
+        **DEFAULT_CONFIG,
+        "zoom_min": 1.2,
+        "zoom_max": 1.1,
+    })
+    assert (reversed_config["zoom_min"], reversed_config["zoom_max"]) == (1.1, 1.2)
+
+    percent_config = validate_strategy_config({
+        **DEFAULT_CONFIG,
+        "zoom_min": 110,
+        "zoom_max": 120,
+    })
+    assert (percent_config["zoom_min"], percent_config["zoom_max"]) == (1.1, 1.2)
+
+    with pytest.raises(ValueError, match="缩放比例必须在 1-1.5 范围内"):
+        validate_strategy_config({**DEFAULT_CONFIG, "zoom_min": 1.1, "zoom_max": 2.0})
+
+
 def test_strategy_config_requires_three_steps():
     with pytest.raises(ValueError, match="至少选择 3"):
         validate_strategy_config({**DEFAULT_CONFIG, "steps": ["zoom", "fx"]})

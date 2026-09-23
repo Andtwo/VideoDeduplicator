@@ -36,11 +36,19 @@ DEFAULT_CONFIG = {
 }
 
 
-def _bounded_pair(config, low_key, high_key, minimum, maximum):
-    low = float(config.get(low_key, minimum))
-    high = float(config.get(high_key, maximum))
+def _bounded_pair(config, low_key, high_key, minimum, maximum, label=None):
+    label = label or f"{low_key}/{high_key}"
+    try:
+        low = float(config.get(low_key, minimum))
+        high = float(config.get(high_key, maximum))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label}必须填写有效数字") from exc
+    if low_key == "zoom_min" and low >= 100 and high >= 100:
+        low, high = low / 100, high / 100
+    if low > high:
+        low, high = high, low
     if not minimum <= low <= high <= maximum:
-        raise ValueError(f"{low_key}/{high_key} 参数范围无效")
+        raise ValueError(f"{label}必须在 {minimum:g}-{maximum:g} 范围内")
     return low, high
 
 
@@ -75,11 +83,11 @@ def validate_strategy_config(raw):
     if not fps_options or set(fps_options) - set(FPS_OPTIONS):
         raise ValueError("至少选择一个有效输出帧率")
 
-    drop_min, drop_max = _bounded_pair(config, "drop_min", "drop_max", 1, 3)
-    zoom_min, zoom_max = _bounded_pair(config, "zoom_min", "zoom_max", 1.0, 1.5)
-    speed_min, speed_max = _bounded_pair(config, "speed_min", "speed_max", 0.5, 2.0)
-    intro_min, intro_max = _bounded_pair(config, "intro_min", "intro_max", 0.0, 5.0)
-    outro_min, outro_max = _bounded_pair(config, "outro_min", "outro_max", 0.0, 5.0)
+    drop_min, drop_max = _bounded_pair(config, "drop_min", "drop_max", 1, 3, "每秒删帧数量")
+    zoom_min, zoom_max = _bounded_pair(config, "zoom_min", "zoom_max", 1.0, 1.5, "缩放比例")
+    speed_min, speed_max = _bounded_pair(config, "speed_min", "speed_max", 0.5, 2.0, "播放速度")
+    intro_min, intro_max = _bounded_pair(config, "intro_min", "intro_max", 0.0, 5.0, "片头时长")
+    outro_min, outro_max = _bounded_pair(config, "outro_min", "outro_max", 0.0, 5.0, "片尾时长")
 
     filter_styles = list(dict.fromkeys(config.get("filter_styles") or []))
     fx_styles = list(dict.fromkeys(config.get("fx_styles") or []))
