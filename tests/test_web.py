@@ -179,6 +179,38 @@ def test_fancy_text_does_not_duplicate_movie_title(monkeypatch, tmp_path):
     assert captured["options"].fancy_text == "精彩片段"
 
 
+def test_worker_applies_selected_mono_filter(monkeypatch, tmp_path):
+    captured = {}
+
+    class ProcessorStub:
+        def __init__(self, *_args):
+            captured["options"] = _args[5]
+            self.failure = ""
+
+        def run(self):
+            Path(tmp_path / "out.mp4").write_bytes(b"video")
+
+    monkeypatch.setattr("web.worker.WebVideoProcessor", ProcessorStub)
+    run_job({
+        "title": "",
+        "video_a_path": "a.mp4",
+        "video_b_path": "",
+        "audio_file_path": "",
+        "output_path": str(tmp_path / "out.mp4"),
+        "temp_dir": str(tmp_path / "tmp"),
+        "strategy": {
+            "steps": ["zoom", "fancy", "filter"],
+            "audio_mode": "original",
+            "fps": 30,
+            "zoom": 1.1,
+            "filter_style": "mono",
+        },
+    })
+    options = captured["options"]
+    assert options.filter_enabled
+    assert options.filter_style == "mono"
+
+
 def test_worker_applies_fixed_speed_from_strategy(monkeypatch, tmp_path):
     captured = {}
 
