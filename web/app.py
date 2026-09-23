@@ -286,6 +286,8 @@ async def process(
 ):
     _start_threads()
     title = title.strip()
+    if not title:
+        raise HTTPException(422, "影视名称不能为空")
     if len(title) > MAX_TITLE_LENGTH:
         raise HTTPException(422, f"影视名称不能超过 {MAX_TITLE_LENGTH} 个字符")
     if _queue.full():
