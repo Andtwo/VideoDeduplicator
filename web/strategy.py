@@ -88,17 +88,27 @@ def validate_strategy_config(raw):
     if not fps_options or set(fps_options) - set(FPS_OPTIONS):
         raise ValueError("至少选择一个有效输出帧率")
 
+    # 未启用的步骤使用默认参数，不让隐藏的旧值阻止保存。
+    dependencies = {
+        "drop_frames": ("drop_min", "drop_max"),
+        "zoom": ("zoom_min", "zoom_max"),
+        "speed": ("speed_min", "speed_max"),
+        "intro": ("intro_min", "intro_max"),
+        "outro": ("outro_min", "outro_max"),
+        "sticker": ("sticker_layout",),
+        "filter": ("filter_styles", "filter_strength"),
+        "fx": ("fx_styles",),
+    }
+    for step, keys in dependencies.items():
+        if step not in steps:
+            for key in keys:
+                config[key] = DEFAULT_CONFIG[key]
+
     drop_min, drop_max = _bounded_pair(config, "drop_min", "drop_max", 1, 3, "每秒删帧数量")
     zoom_min, zoom_max = _bounded_pair(config, "zoom_min", "zoom_max", 1.0, 1.5, "缩放比例")
     speed_min, speed_max = _bounded_pair(config, "speed_min", "speed_max", 0.5, 2.0, "播放速度")
     intro_min, intro_max = _bounded_pair(config, "intro_min", "intro_max", 0.0, 5.0, "片头时长")
     outro_min, outro_max = _bounded_pair(config, "outro_min", "outro_max", 0.0, 5.0, "片尾时长")
-    aspect_ratio = str(config.get("aspect_ratio", "source"))
-    if aspect_ratio not in ASPECT_RATIOS:
-        raise ValueError("输出画幅必须是原画幅、4:3、16:9 或 9:16")
-    sticker_layout = str(config.get("sticker_layout", "corners"))
-    if sticker_layout not in STICKER_LAYOUTS:
-        raise ValueError("贴纸布局配置无效")
 
     filter_styles = list(dict.fromkeys(config.get("filter_styles") or []))
     filter_strength = float(config.get("filter_strength", 1.0))
@@ -110,6 +120,16 @@ def validate_strategy_config(raw):
     if "fx" in steps and (not fx_styles or set(fx_styles) - set(FX_STYLES)):
         raise ValueError("特效步骤需要至少一个有效特效样式")
 
+    def candidates(key, legacy, allowed):
+        values = raw.get(key, [config[legacy]])
+        if legacy == "sticker_layout" and "sticker" not in steps:
+            values = [DEFAULT_CONFIG[legacy]]
+        if not isinstance(values, list) or not values or any(not isinstance(v, str) or v not in allowed for v in values):
+            raise ValueError("请至少选择一个有效的" + ("输出画幅" if key == "aspect_ratios" else "贴纸布局"))
+        return list(dict.fromkeys(values))
+
+    aspect_ratios = candidates("aspect_ratios", "aspect_ratio", ASPECT_RATIOS)
+    sticker_layouts = candidates("sticker_layouts", "sticker_layout", STICKER_LAYOUTS)
     return {
         "selection_mode": mode,
         "steps": steps,
@@ -130,8 +150,8 @@ def validate_strategy_config(raw):
         "intro_max": round(intro_max, 1),
         "outro_min": round(outro_min, 1),
         "outro_max": round(outro_max, 1),
-        "aspect_ratio": aspect_ratio,
-        "sticker_layout": sticker_layout,
+        "aspect_ratios": aspect_ratios,
+        "sticker_layouts": sticker_layouts,
     }
 
 
@@ -158,6 +178,10 @@ def generate_strategy(has_audio_file=False, has_video_b=False, title="", rng=Non
 
     available_fps = [fps for fps in config["fps_options"] if has_video_b or fps == 30]
     fps = rng.choice(available_fps or [30])
+    layouts = config["sticker_layouts"]
+    # 每个非空子集等概率；三种候选对应七种组合。
+    mask = rng.randint(1, (1 << len(layouts)) - 1) if "sticker" in steps else 0
+    selected_layouts = [layout for i, layout in enumerate(layouts) if mask & (1 << i)]
     strategy = {
         "title": title,
         "steps": steps,
@@ -171,7 +195,8 @@ def generate_strategy(has_audio_file=False, has_video_b=False, title="", rng=Non
         "fx_style": rng.choice(config["fx_styles"]) if "fx" in steps else None,
         "intro_duration": round(rng.uniform(config["intro_min"], config["intro_max"]), 1) if "intro" in steps else 0,
         "outro_duration": round(rng.uniform(config["outro_min"], config["outro_max"]), 1) if "outro" in steps else 0,
-        "aspect_ratio": config["aspect_ratio"],
-        "sticker_layout": config["sticker_layout"],
+        "aspect_ratio": rng.choice(config["aspect_ratios"]),
+        "sticker_layout": selected_layouts[0] if selected_layouts else "corners",
+        "sticker_layouts": selected_layouts,
     }
     return strategy

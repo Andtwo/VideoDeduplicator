@@ -13,6 +13,10 @@ MAX_NAME_LENGTH = 60
 MAX_DESCRIPTION_LENGTH = 300
 
 
+class StrategyConflictError(ValueError):
+    """客户端编辑的配置已过期。"""
+
+
 class StrategyStore:
     def __init__(self, path):
         self.path = Path(path)
@@ -103,6 +107,42 @@ class StrategyStore:
             data["versions"].append(version)
             self._write(data)
             return copy.deepcopy(version)
+
+    def update_version(self, version_id, name, description, config, expected_revision=None):
+        name = str(name or "").strip()
+        if not name or len(name) > MAX_NAME_LENGTH:
+            raise ValueError(f"策略名称长度必须为 1-{MAX_NAME_LENGTH} 个字符")
+        description = str(description or "").strip()
+        if len(description) > MAX_DESCRIPTION_LENGTH:
+            raise ValueError(f"策略说明不能超过 {MAX_DESCRIPTION_LENGTH} 个字符")
+        normalized = validate_strategy_config(config)
+        with self._lock:
+            data = self._read()
+            version = next((v for v in data["versions"] if v["id"] == version_id), None)
+            if version is None:
+                raise KeyError(version_id)
+            revision = version.get("revision", 0)
+            if type(expected_revision) is not int or expected_revision != revision:
+                raise StrategyConflictError("该策略已被更新，请重新加载所选版本后再保存")
+            if any(v["id"] != version_id and v["name"] == name and v["version"] == version["version"] for v in data["versions"]):
+                raise ValueError("该名称下已存在相同版本号，请使用其他名称")
+            version.update(name=name, description=description, config=normalized,
+                           updated_at=time.time(), revision=revision + 1)
+            self._write(data)
+            return copy.deepcopy(version)
+
+    def delete_versions(self, version_ids):
+        if not isinstance(version_ids, list) or not version_ids or any(not isinstance(v, str) for v in version_ids):
+            raise ValueError("请选择要删除的策略版本")
+        ids = set(version_ids)
+        with self._lock:
+            data = self._read()
+            if data["active_id"] in ids:
+                raise ValueError("当前启用的策略版本不能删除")
+            if ids - {v["id"] for v in data["versions"]}:
+                raise KeyError("策略版本不存在")
+            data["versions"] = [v for v in data["versions"] if v["id"] not in ids]
+            self._write(data)
 
     def activate(self, version_id):
         with self._lock:

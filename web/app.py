@@ -1,4 +1,6 @@
 """Linux Web 服务入口：单进程持久化队列与受限上传。"""
+import logging
+import sqlite3
 import hmac
 import json
 import os
@@ -14,8 +16,9 @@ from queue import Empty, Full, Queue
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
-from web.strategy_store import StrategyStore
+from web.strategy_store import StrategyStore, StrategyConflictError
 from web.worker import run_job
 
 BASE = Path(__file__).resolve().parent.parent
@@ -26,6 +29,24 @@ UPLOADS.mkdir(exist_ok=True)
 OUTPUTS.mkdir(exist_ok=True)
 WEB_DATA.mkdir(exist_ok=True)
 STRATEGY_STORE = StrategyStore(WEB_DATA / "strategies.json")
+from web.analytics import Analytics
+ANALYTICS = None
+_analytics_lock = threading.RLock()
+
+
+def _analytics_call(method, *args):
+    global ANALYTICS
+    if not _analytics_lock.acquire(blocking=False):
+        return None  # 忙时丢弃心跳/计数，任务状态由周期补录恢复。
+    try:
+        if ANALYTICS is None:
+            ANALYTICS = Analytics(WEB_DATA / "analytics.sqlite3")
+        return getattr(ANALYTICS, method)(*args)
+    except (sqlite3.Error, OSError):
+        logging.getLogger(__name__).warning('统计操作失败: %s；业务继续执行', method, exc_info=True)
+        return None
+    finally:
+        _analytics_lock.release()
 
 MAX_UPLOAD_BYTES = int(os.getenv("VD_MAX_UPLOAD_MB", "2048")) * 1024 * 1024
 MAX_PENDING_TASKS = int(os.getenv("VD_MAX_PENDING_TASKS", "20"))
@@ -74,8 +95,14 @@ def _update_task(task_id, **changes):
         if not task:
             return
         task.update(changes)
+        if changes.get('status') == 'processing':
+            task['started_at'] = time.time()
+        if changes.get('status') in ('done', 'error'):
+            task['ended_at'] = time.time()
         task["updated_at"] = time.time()
         _persist_task(task_id)
+        snapshot = dict(task)
+    _analytics_call('task', snapshot)
 
 
 def _log(task_id, message):
@@ -104,7 +131,7 @@ def _worker():
             run_job(job, on_status=lambda message: _log(task_id, message))
             _update_task(task_id, status="done", output=job["output_path"])
         except Exception as exc:
-            _update_task(task_id, status="error")
+            _update_task(task_id, status="error", error_summary=type(exc).__name__)
             _log(task_id, f"错误: {exc}")
         finally:
             _queue.task_done()
@@ -112,6 +139,10 @@ def _worker():
 
 def _cleanup_loop():
     while not _stop.wait(600):
+        with _lock:
+            snapshots = [dict(task) for task in _tasks.values()]
+        for task in snapshots:
+            _analytics_call('task', task)
         _cleanup_expired()
 
 
@@ -146,6 +177,7 @@ def _load_tasks():
                 task["updated_at"] = time.time()
             _tasks[task_id] = task
             _persist_task(task_id)
+            _analytics_call('task', task)
             if task.get("status") == "queued" and task.get("job"):
                 restored.append(task_id)
         except (OSError, ValueError, KeyError, TypeError):
@@ -184,8 +216,17 @@ app.mount(
 
 
 @app.get("/", response_class=HTMLResponse)
-def index():
-    return (Path(__file__).parent / "templates" / "index.html").read_text(encoding="utf-8")
+def index(request: Request):
+    return _render_page("index.html", request)
+
+
+def _render_page(filename, request):
+    # 代理覆盖该请求头；仅接受路径字符，避免注入 HTML 或跨域地址。
+    prefix = request.headers.get("x-forwarded-prefix", request.scope.get("root_path", "")).rstrip("/")
+    if prefix and (not re.fullmatch(r"(?:/[A-Za-z0-9_-]+)+", prefix)):
+        raise HTTPException(400, "无效的部署路径前缀")
+    html = (Path(__file__).parent / "templates" / filename).read_text(encoding="utf-8")
+    return html.replace("__APP_BASE__", prefix)
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -208,8 +249,48 @@ def _require_admin(request: Request, x_admin_token: str = Header("")):
 def strategy_admin(request: Request):
     if not ADMIN_TOKEN:
         _require_admin(request)
-    html = (Path(__file__).parent / "templates" / "strategy_admin.html").read_text(encoding="utf-8")
+    html = _render_page("strategy_admin.html", request)
     return html.replace("__ADMIN_TOKEN_REQUIRED__", "true" if ADMIN_TOKEN else "false")
+
+
+@app.post('/api/usage', status_code=204)
+async def usage(request: Request):
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > 1024:
+            raise HTTPException(413, '请求过大')
+    try:
+        data = json.loads(body)
+    except (ValueError, UnicodeError):
+        raise HTTPException(422, '无效的访问数据')
+    if not isinstance(data, dict) or any(not isinstance(data.get(k), str) or not re.fullmatch(r'[a-f0-9]{32}', data[k]) for k in ('page', 'visitor')):
+        raise HTTPException(422, '无效的访问标识')
+    await run_in_threadpool(_analytics_call, 'visit', data['page'], data['visitor'])
+    return Response(status_code=204)
+
+
+@app.get('/admin/statistics', response_class=HTMLResponse)
+def statistics_page(request: Request):
+    if not ADMIN_TOKEN:
+        _require_admin(request)
+    return _render_page('statistics.html', request)
+
+
+@app.get('/api/admin/statistics')
+def statistics(request: Request, start: str, end: str, x_admin_token: str = Header('')):
+    from datetime import date
+    _require_admin(request, x_admin_token)
+    try:
+        first, last = date.fromisoformat(start), date.fromisoformat(end)
+        if first > last or (last-first).days > 366:
+            raise ValueError()
+    except ValueError:
+        raise HTTPException(422, '请选择有效日期，范围不超过一年')
+    result = _analytics_call('report', first.isoformat(), last.isoformat())
+    if result is None:
+        raise HTTPException(503, '统计暂不可用，请稍后重试')
+    return result
 
 
 @app.get("/api/admin/strategies", dependencies=[])
@@ -228,6 +309,39 @@ async def create_strategy(request: Request, x_admin_token: str = Header("")):
         return STRATEGY_STORE.create_version(
             payload.get("name"), payload.get("description"), payload.get("config")
         )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/admin/strategies/batch-delete", status_code=204)
+async def delete_strategy_batch(request: Request, x_admin_token: str = Header("")):
+    _require_admin(request, x_admin_token)
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("请求内容必须是对象")
+        STRATEGY_STORE.delete_versions(payload.get("ids"))
+    except KeyError as exc:
+        raise HTTPException(404, "策略版本不存在") from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return Response(status_code=204)
+
+
+@app.put("/api/admin/strategies/{version_id}")
+async def update_strategy(version_id: str, request: Request, x_admin_token: str = Header("")):
+    _require_admin(request, x_admin_token)
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("请求内容必须是对象")
+        return STRATEGY_STORE.update_version(
+            version_id, payload.get("name"), payload.get("description"),
+            payload.get("config"), payload.get("expected_revision"))
+    except StrategyConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(404, "策略版本不存在") from exc
     except (ValueError, TypeError) as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -338,10 +452,12 @@ async def process(
             _tasks[task_id] = task
             _persist_task(task_id)
         try:
+            await run_in_threadpool(_analytics_call, 'task', dict(task))
             _queue.put_nowait(task_id)
         except Full:
             with _lock:
                 _tasks.pop(task_id, None)
+            await run_in_threadpool(_analytics_call, 'remove', task_id)
             raise HTTPException(429, "任务队列已满，请稍后重试")
         return {"task_id": task_id}
     except Exception:
@@ -377,4 +493,5 @@ def download(task_id: str):
         filename = task["download_name"]
     if not output.is_file():
         raise HTTPException(410, "输出文件已不存在")
+    _analytics_call('download', task_id)
     return FileResponse(output, filename=filename, media_type="video/mp4")

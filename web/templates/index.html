@@ -28,7 +28,7 @@ input[type=text]:focus{border-color:var(--accent)}
 <body>
 <div class="card">
 <h1>VideoDeduplicator</h1>
-<div class="sub">随机处理策略 · 至少 3 个画面步骤 · 自动压制字幕条</div>
+<div class="sub">处理后的视频不保证100%通过平台的去重判定</div>
 <form id="f">
 <div class="field"><label>内容视频 A（必填）</label><input type="file" name="video_a" accept="video/*" required></div>
 <div class="field" hidden><label>素材视频 B（可选）</label><input type="file" name="video_b" accept="video/*"></div>
@@ -41,6 +41,13 @@ input[type=text]:focus{border-color:var(--accent)}
 <a class="dl" id="dl" href="#" style="display:none">下载处理结果</a>
 </div>
 <script>
+const APP_BASE='__APP_BASE__';
+// 匿名浏览器标识；不采集 IP 或设备指纹。可见页面每 30 秒心跳。
+const randomId=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
+const pageId=randomId();let visitorId=randomId();
+try{visitorId=localStorage.getItem('vd_visitor')||visitorId;if(!/^[a-f0-9]{32}$/.test(visitorId))visitorId=randomId();localStorage.setItem('vd_visitor',visitorId)}catch{}
+function heartbeat(){if(document.visibilityState==='visible')fetch(APP_BASE+'/api/usage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:pageId,visitor:visitorId}),keepalive:true}).catch(()=>{})}
+heartbeat();setInterval(heartbeat,30000);document.addEventListener('visibilitychange',heartbeat);
 const f=document.getElementById('f'),st=document.getElementById('st'),log=document.getElementById('log'),dl=document.getElementById('dl'),btn=f.querySelector('button');
 let timer=null;
 const fail=message=>{st.textContent=message;st.className='status error';btn.disabled=false;if(timer)clearInterval(timer)};
@@ -48,16 +55,16 @@ f.onsubmit=async e=>{
 e.preventDefault();if(timer)clearInterval(timer);btn.disabled=true;st.textContent='上传中...';st.className='status';dl.style.display='none';log.style.display='none';
 const title=f.title.value.trim();if(!title){fail('请填写影视名称');return}
 try{
-const r=await fetch('/api/process',{method:'POST',body:new FormData(f)});const d=await r.json();
+const r=await fetch(APP_BASE+'/api/process',{method:'POST',body:new FormData(f)});const d=await r.json();
 if(!r.ok)throw new Error(d.detail||'提交失败');
 st.textContent='排队中...';timer=setInterval(async()=>{
 try{
-const response=await fetch('/api/status/'+d.task_id);const s=await response.json();
+const response=await fetch(APP_BASE+'/api/status/'+d.task_id);const s=await response.json();
 if(!response.ok)throw new Error(s.detail||'状态查询失败');
 st.textContent=s.status==='processing'?'处理中...':s.status==='done'?'处理完成':s.status==='error'?'处理失败':'排队中...';
 st.className='status '+(s.status==='done'?'done':s.status==='error'?'error':'');
 if(s.log){log.style.display='block';log.textContent=s.log;log.scrollTop=log.scrollHeight}
-if(s.status==='done'){clearInterval(timer);btn.disabled=false;dl.style.display='inline-block';dl.href='/api/download/'+d.task_id}
+if(s.status==='done'){clearInterval(timer);btn.disabled=false;dl.style.display='inline-block';dl.href=APP_BASE+'/api/download/'+d.task_id}
 if(s.status==='error'){clearInterval(timer);btn.disabled=false}
 }catch(error){fail(error.message)}
 },1500)
