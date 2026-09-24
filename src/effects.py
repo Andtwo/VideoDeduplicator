@@ -494,16 +494,18 @@ class EffectPipeline:
                     entries, width, height, fps,
                     force_bar=options.caption_force_bar,
                 )
+        layouts = options.sticker_layouts or [options.sticker_layout]
         if options.sticker_enabled:
             bottom_safe_y = caption_overlay.safe_top_y if caption_overlay and options.caption_force_bar else None
-            self.overlays.append(StickerOverlay(
-                rng, width, height,
-                bottom_safe_y=bottom_safe_y,
-                reserve_top_left=options.reserve_top_left,
-                layout=options.sticker_layout,
-            ))
+            for layout in dict.fromkeys(layouts):
+                self.overlays.append(StickerOverlay(
+                    rng, width, height,
+                    bottom_safe_y=bottom_safe_y,
+                    reserve_top_left=options.reserve_top_left,
+                    layout=layout,
+                ))
         if caption_overlay is not None:
-            if options.sticker_enabled and options.sticker_layout != "corners":
+            if options.sticker_enabled and any(layout != "corners" for layout in layouts):
                 self.overlays.insert(0, caption_overlay)
             else:
                 self.overlays.append(caption_overlay)

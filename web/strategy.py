@@ -126,6 +126,16 @@ def validate_strategy_config(raw):
     if "fx" in steps and (not fx_styles or set(fx_styles) - set(FX_STYLES)):
         raise ValueError("特效步骤需要至少一个有效特效样式")
 
+    def candidates(key, legacy, allowed):
+        values = raw.get(key, [config[legacy]])
+        if legacy == "sticker_layout" and "sticker" not in steps:
+            values = [DEFAULT_CONFIG[legacy]]
+        if not isinstance(values, list) or not values or any(not isinstance(v, str) or v not in allowed for v in values):
+            raise ValueError("请至少选择一个有效的" + ("输出画幅" if key == "aspect_ratios" else "贴纸布局"))
+        return list(dict.fromkeys(values))
+
+    aspect_ratios = candidates("aspect_ratios", "aspect_ratio", ASPECT_RATIOS)
+    sticker_layouts = candidates("sticker_layouts", "sticker_layout", STICKER_LAYOUTS)
     return {
         "selection_mode": mode,
         "steps": steps,
@@ -146,8 +156,10 @@ def validate_strategy_config(raw):
         "intro_max": round(intro_max, 1),
         "outro_min": round(outro_min, 1),
         "outro_max": round(outro_max, 1),
-        "aspect_ratio": aspect_ratio,
-        "sticker_layout": sticker_layout,
+        "aspect_ratio": aspect_ratios[0],
+        "sticker_layout": sticker_layouts[0],
+        "aspect_ratios": aspect_ratios,
+        "sticker_layouts": sticker_layouts,
     }
 
 
@@ -174,6 +186,10 @@ def generate_strategy(has_audio_file=False, has_video_b=False, title="", rng=Non
 
     available_fps = [fps for fps in config["fps_options"] if has_video_b or fps == 30]
     fps = rng.choice(available_fps or [30])
+    layouts = config["sticker_layouts"]
+    # 每个非空子集等概率；三种候选对应七种组合。
+    mask = rng.randint(1, (1 << len(layouts)) - 1) if "sticker" in steps else 0
+    selected_layouts = [layout for i, layout in enumerate(layouts) if mask & (1 << i)]
     strategy = {
         "title": title,
         "steps": steps,
@@ -187,7 +203,8 @@ def generate_strategy(has_audio_file=False, has_video_b=False, title="", rng=Non
         "fx_style": rng.choice(config["fx_styles"]) if "fx" in steps else None,
         "intro_duration": round(rng.uniform(config["intro_min"], config["intro_max"]), 1) if "intro" in steps else 0,
         "outro_duration": round(rng.uniform(config["outro_min"], config["outro_max"]), 1) if "outro" in steps else 0,
-        "aspect_ratio": config["aspect_ratio"],
-        "sticker_layout": config["sticker_layout"],
+        "aspect_ratio": rng.choice(config["aspect_ratios"]),
+        "sticker_layout": selected_layouts[0] if selected_layouts else "corners",
+        "sticker_layouts": selected_layouts,
     }
     return strategy

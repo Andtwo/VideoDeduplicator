@@ -46,7 +46,10 @@ def run_job(job, on_status=None):
     if "sticker" in steps:
         opts.sticker_enabled = True
         opts.sticker_layout = strategy.get("sticker_layout", "corners")
+        opts.sticker_layouts = strategy.get("sticker_layouts") or [opts.sticker_layout]
+        status("贴纸组合: " + ", ".join(opts.sticker_layouts))
     opts.aspect_ratio = strategy.get("aspect_ratio", "source")
+    status("本次输出画幅: " + opts.aspect_ratio)
     if "fancy" in steps:
         opts.fancy_enabled, opts.fancy_text = True, "精彩片段"
     if "progress" in steps:

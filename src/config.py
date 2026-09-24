@@ -41,6 +41,7 @@ class ProcessingOptions:
     # ⑧ 贴纸布局：四角、顶部横条、左右竖条
     sticker_enabled: bool = False
     sticker_layout: str = "corners"
+    sticker_layouts: list = field(default_factory=list)
 
     # ⑤ 音频：BGM 替换 / 混音 / 配音替换
     audio_mode: str = "original"
