@@ -88,6 +88,22 @@ def validate_strategy_config(raw):
     if not fps_options or set(fps_options) - set(FPS_OPTIONS):
         raise ValueError("至少选择一个有效输出帧率")
 
+    # 未启用的步骤使用默认参数，不让隐藏的旧值阻止保存。
+    dependencies = {
+        "drop_frames": ("drop_min", "drop_max"),
+        "zoom": ("zoom_min", "zoom_max"),
+        "speed": ("speed_min", "speed_max"),
+        "intro": ("intro_min", "intro_max"),
+        "outro": ("outro_min", "outro_max"),
+        "sticker": ("sticker_layout",),
+        "filter": ("filter_styles", "filter_strength"),
+        "fx": ("fx_styles",),
+    }
+    for step, keys in dependencies.items():
+        if step not in steps:
+            for key in keys:
+                config[key] = DEFAULT_CONFIG[key]
+
     drop_min, drop_max = _bounded_pair(config, "drop_min", "drop_max", 1, 3, "每秒删帧数量")
     zoom_min, zoom_max = _bounded_pair(config, "zoom_min", "zoom_max", 1.0, 1.5, "缩放比例")
     speed_min, speed_max = _bounded_pair(config, "speed_min", "speed_max", 0.5, 2.0, "播放速度")
