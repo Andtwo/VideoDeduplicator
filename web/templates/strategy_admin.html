@@ -40,7 +40,7 @@
 <div class="field candidate-field" id="filterField"><label>滤镜候选（仅在启用“滤镜”步骤时生效）</label><div class="checks" id="filters"></div><div class="field" style="margin-top:10px"><label for="filterStrength">滤镜强度（0-100%，黑白建议 100%）</label><input id="filterStrength" type="number" min="0" max="100" step="1"></div></div>
 <div class="field candidate-field" id="effectField"><label>特效候选（仅在启用“画面特效”步骤时生效）</label><div class="checks" id="effects"></div></div>
 </div></div>
-<div class="actions"><button class="btn danger" id="deleteBtn" type="button">删除所选版本</button><button class="btn" id="activateBtn" type="button">启用所选版本</button><button class="btn" id="reloadBtn" type="button">重新加载所选版本</button><button class="btn primary" id="updateBtn" type="button">保存当前版本</button><button class="btn" id="saveBtn" type="button">保存为新版本</button></div>
+<div class="actions"><button class="btn danger" id="deleteBtn" type="button">删除所选版本</button><button class="btn" id="activateBtn" type="button">启用所选版本</button><button class="btn" id="reloadBtn" type="button">撤销所有改动</button><button class="btn primary" id="updateBtn" type="button">保存当前版本</button><button class="btn" id="saveBtn" type="button">保存为新版本</button></div>
 </section>
 </main>
 </div>
@@ -100,7 +100,7 @@ function render(){syncBatch();$('updateBtn').disabled=!selectedId;if(!versions.l
 function escapeHtml(value){const node=document.createElement('span');node.textContent=value;return node.innerHTML}
 function select(id){const v=versions.find(item=>item.id===id);if(!v)return;selectedId=id;$('name').value=v.name;$('description').value=v.description||'';fill(v.config);$('activateBtn').disabled=v.active;$('deleteBtn').disabled=v.active;render()}
 async function load(){try{const data=await api('/api/admin/strategies');notice.className='notice';notice.textContent='';versions=data.versions;const preferred=versions.find(v=>v.id===selectedId)||versions.find(v=>v.active)||versions[0];if(preferred)select(preferred.id)}catch(error){message(error.message,'error')}}
-$('reloadBtn').onclick=()=>{if(confirm('重新加载将丢弃未保存的修改，是否继续？'))load()};
+$('reloadBtn').onclick=()=>{if(confirm('确定撤销所有未保存的改动，恢复已保存的配置吗？'))load()};
 $('selectAll').onchange=()=>{deleteSelection.clear();if($('selectAll').checked)versions.filter(v=>!v.active).forEach(v=>deleteSelection.add(v.id));render()};
 $('batchDeleteBtn').onclick=async()=>{if(!deleteSelection.size||!confirm(`确定删除选中的 ${deleteSelection.size} 个策略版本吗？`))return;try{await api('/api/admin/strategies/batch-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...deleteSelection]})});deleteSelection.clear();await load();message('所选版本已删除')}catch(error){message(error.message,'error')}};
 async function saveVersion(update){
