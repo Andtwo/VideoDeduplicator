@@ -26,6 +26,8 @@ UPLOADS.mkdir(exist_ok=True)
 OUTPUTS.mkdir(exist_ok=True)
 WEB_DATA.mkdir(exist_ok=True)
 STRATEGY_STORE = StrategyStore(WEB_DATA / "strategies.json")
+from web.analytics import Analytics
+ANALYTICS = Analytics(WEB_DATA / "analytics.sqlite3")
 
 MAX_UPLOAD_BYTES = int(os.getenv("VD_MAX_UPLOAD_MB", "2048")) * 1024 * 1024
 MAX_PENDING_TASKS = int(os.getenv("VD_MAX_PENDING_TASKS", "20"))
@@ -74,6 +76,11 @@ def _update_task(task_id, **changes):
         if not task:
             return
         task.update(changes)
+        if changes.get('status') == 'processing':
+            task['started_at'] = time.time()
+        if changes.get('status') in ('done', 'error'):
+            task['ended_at'] = time.time()
+        ANALYTICS.task(task)
         task["updated_at"] = time.time()
         _persist_task(task_id)
 
@@ -104,7 +111,7 @@ def _worker():
             run_job(job, on_status=lambda message: _log(task_id, message))
             _update_task(task_id, status="done", output=job["output_path"])
         except Exception as exc:
-            _update_task(task_id, status="error")
+            _update_task(task_id, status="error", error_summary=type(exc).__name__)
             _log(task_id, f"错误: {exc}")
         finally:
             _queue.task_done()
@@ -146,6 +153,7 @@ def _load_tasks():
                 task["updated_at"] = time.time()
             _tasks[task_id] = task
             _persist_task(task_id)
+            ANALYTICS.task(task)
             if task.get("status") == "queued" and task.get("job"):
                 restored.append(task_id)
         except (OSError, ValueError, KeyError, TypeError):
@@ -219,6 +227,43 @@ def strategy_admin(request: Request):
         _require_admin(request)
     html = _render_page("strategy_admin.html", request)
     return html.replace("__ADMIN_TOKEN_REQUIRED__", "true" if ADMIN_TOKEN else "false")
+
+
+@app.post('/api/usage', status_code=204)
+async def usage(request: Request):
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > 1024:
+            raise HTTPException(413, '请求过大')
+    try:
+        data = json.loads(body)
+    except (ValueError, UnicodeError):
+        raise HTTPException(422, '无效的访问数据')
+    if not isinstance(data, dict) or any(not isinstance(data.get(k), str) or not re.fullmatch(r'[a-f0-9]{32}', data[k]) for k in ('page', 'visitor')):
+        raise HTTPException(422, '无效的访问标识')
+    ANALYTICS.visit(data['page'], data['visitor'])
+    return Response(status_code=204)
+
+
+@app.get('/admin/statistics', response_class=HTMLResponse)
+def statistics_page(request: Request):
+    if not ADMIN_TOKEN:
+        _require_admin(request)
+    return _render_page('statistics.html', request)
+
+
+@app.get('/api/admin/statistics')
+def statistics(request: Request, start: str, end: str, x_admin_token: str = Header('')):
+    from datetime import date
+    _require_admin(request, x_admin_token)
+    try:
+        first, last = date.fromisoformat(start), date.fromisoformat(end)
+        if first > last or (last-first).days > 366:
+            raise ValueError()
+    except ValueError:
+        raise HTTPException(422, '请选择有效日期，范围不超过一年')
+    return ANALYTICS.report(first.isoformat(), last.isoformat())
 
 
 @app.get("/api/admin/strategies", dependencies=[])
@@ -380,10 +425,13 @@ async def process(
             _tasks[task_id] = task
             _persist_task(task_id)
         try:
+            ANALYTICS.task(task)
             _queue.put_nowait(task_id)
         except Full:
             with _lock:
                 _tasks.pop(task_id, None)
+                with ANALYTICS.connect() as db:
+                    db.execute('DELETE FROM jobs WHERE id=?', (task_id,))
             raise HTTPException(429, "任务队列已满，请稍后重试")
         return {"task_id": task_id}
     except Exception:
@@ -419,4 +467,5 @@ def download(task_id: str):
         filename = task["download_name"]
     if not output.is_file():
         raise HTTPException(410, "输出文件已不存在")
+    ANALYTICS.download(task_id)
     return FileResponse(output, filename=filename, media_type="video/mp4")

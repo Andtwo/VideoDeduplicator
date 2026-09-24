@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>数据统计 - VideoDeduplicator</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#090c12;color:#e9edf4;font:14px -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}main{max-width:1440px;margin:auto;padding:24px}header,nav,.filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap}header{justify-content:space-between;border-bottom:1px solid #283142;padding-bottom:20px}a{color:#5eead4;text-decoration:none}button,input{font:inherit;padding:9px;background:#151b25;color:inherit;border:1px solid #283142;border-radius:6px}button{cursor:pointer}.filters{margin:24px 0}.muted{color:#8e98aa;line-height:1.7}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.metric,section{background:#10151e;border:1px solid #283142;border-radius:8px;padding:18px}.metric strong{display:block;font-size:28px;margin-top:12px;font-variant-numeric:tabular-nums}section{margin-top:20px}h2{font-size:16px}.table{overflow:auto;max-height:460px}table{border-collapse:collapse;width:100%;text-align:left;white-space:nowrap}td,th{padding:12px;border-bottom:1px solid #283142}th{color:#8e98aa;position:sticky;top:0;background:#10151e}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}#message{color:#f4c66a}#auth{margin-top:20px}input[type=password]{min-width:240px}@media(max-width:700px){main{padding:14px}.grid{grid-template-columns:1fr}}
+</style></head><body><main>
+<header><h1>数据统计</h1><nav><a href="__APP_BASE__/admin/strategies">策略管理</a><a href="__APP_BASE__/admin/statistics" aria-current="page">数据统计</a><a href="__APP_BASE__/">返回用户端</a></nav></header>
+<form id="auth" hidden><label>管理令牌 <input id="token" type="password" autocomplete="off" required></label> <button>验证并加载</button></form>
+<div class="filters"><label>开始日期 <input type="date" id="start"></label><label>结束日期 <input type="date" id="end"></label><button id="refresh">查询 / 刷新</button><span id="updated" class="muted"></span></div>
+<p id="message" role="status"></p><div class="metrics" id="metrics"></div>
+<p class="muted">日期按北京时间（UTC+8）。PV 为用户页面按天去重的打开次数（跨日仍可见的页面计入新一天），UV 为匿名浏览器去重数；清除浏览器存储或更换设备会重复计数。在线人数为最近 90 秒有可见页面心跳的访客。任务按提交日期归属；成功率＝成功 / 已结束任务，下载率＝发起过下载的成功任务 / 成功任务。下载次数是文件请求次数，不代表下载完成或已保存相册。历史耗时缺失显示“—”。访问统计从本功能上线开始。</p>
+<section><h2>每日访问</h2><div id="trend" class="table"></div></section>
+<div class="grid"><section><h2>剧名热度 · Top 20</h2><div id="titles" class="table"></div></section><section><h2>策略使用量</h2><div id="strategies" class="table"></div></section></div>
+<section><h2>失败类型 · Top 20</h2><div id="errors" class="table"></div></section>
+<section><h2>最近任务 · 最多 100 条</h2><div id="jobs" class="table"></div></section>
+</main><script>
+const BASE='__APP_BASE__',$=id=>document.getElementById(id);
+function dateText(date){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(date)}
+$('end').value=dateText(new Date());$('start').value=dateText(new Date(Date.now()-6*86400000));
+const pct=v=>v===null?'—':(v*100).toFixed(1)+'%',seconds=v=>v===null?'—':v.toFixed(1)+' 秒';
+function table(id,heads,rows){const t=document.createElement('table');const head=t.createTHead().insertRow();heads.forEach(x=>{const th=document.createElement('th');th.textContent=x;head.appendChild(th)});const body=t.createTBody();for(const row of rows){const tr=body.insertRow();row.forEach(x=>tr.insertCell().textContent=x??'—')}$ (id).replaceChildren(t);if(!rows.length){const p=document.createElement('p');p.textContent='所选日期暂无数据';$(id).appendChild(p)}}
+async function load(){ $('refresh').disabled=true;$('message').textContent='加载中…';try{
+const token=sessionStorage.getItem('vd_admin_token')||'';const params=new URLSearchParams({start:$('start').value,end:$('end').value});const r=await fetch(BASE+'/api/admin/statistics?'+params,{headers:{'X-Admin-Token':token}});
+if(r.status===401){$('auth').hidden=false;throw Error('请输入有效的管理令牌')}
+const d=await r.json();if(!r.ok)throw Error(d.detail||'加载失败');$('auth').hidden=true;
+const items=[['当前在线',d.online],['PV',d.pv],['UV',d.uv],['提交任务',d.total],['成功任务',d.done],['失败任务',d.failed],['成功率',pct(d.success_rate)],['下载率',pct(d.download_rate)],['下载请求',d.downloads],['平均处理耗时',seconds(d.avg_seconds)],['P95 处理耗时',seconds(d.p95_seconds)],['排队 / 处理中',d.queued+' / '+d.processing]];
+$('metrics').replaceChildren();for(const [name,value] of items){const box=document.createElement('div');box.className='metric';const label=document.createElement('span');label.textContent=name;const strong=document.createElement('strong');strong.textContent=value;box.append(label,strong);$('metrics').appendChild(box)}
+table('trend',['日期','PV','UV'],d.trend.map(r=>[r.day,r.pv,r.uv]));table('titles',['剧名','任务数'],d.titles);table('strategies',['策略','任务数'],d.strategies);
+table('errors',['失败类型','次数'],d.errors);
+const statuses={queued:'排队中',processing:'处理中',done:'成功',error:'失败'};
+table('jobs',['提交时间（北京时间）','剧名','策略','状态','处理耗时','下载次数'],d.jobs.map(j=>[new Date(j.created*1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}),j.title,j.strategy,statuses[j.status]||j.status,j.started&&j.ended?seconds(j.ended-j.started):'—',j.downloads]));
+$('message').textContent='';$('updated').textContent='更新于 '+new Date().toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai'});
+}catch(e){$('message').textContent=e.message}finally{$('refresh').disabled=false}}
+$('refresh').onclick=load;$('auth').onsubmit=e=>{e.preventDefault();sessionStorage.setItem('vd_admin_token',$('token').value.trim());load()};load();
+</script></body></html>

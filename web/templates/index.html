@@ -42,6 +42,12 @@ input[type=text]:focus{border-color:var(--accent)}
 </div>
 <script>
 const APP_BASE='__APP_BASE__';
+// 匿名浏览器标识；不采集 IP 或设备指纹。可见页面每 30 秒心跳。
+const randomId=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
+const pageId=randomId();let visitorId=randomId();
+try{visitorId=localStorage.getItem('vd_visitor')||visitorId;if(!/^[a-f0-9]{32}$/.test(visitorId))visitorId=randomId();localStorage.setItem('vd_visitor',visitorId)}catch{}
+function heartbeat(){if(document.visibilityState==='visible')fetch(APP_BASE+'/api/usage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:pageId,visitor:visitorId}),keepalive:true}).catch(()=>{})}
+heartbeat();setInterval(heartbeat,30000);document.addEventListener('visibilitychange',heartbeat);
 const f=document.getElementById('f'),st=document.getElementById('st'),log=document.getElementById('log'),dl=document.getElementById('dl'),btn=f.querySelector('button');
 let timer=null;
 const fail=message=>{st.textContent=message;st.className='status error';btn.disabled=false;if(timer)clearInterval(timer)};

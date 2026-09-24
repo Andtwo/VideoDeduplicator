@@ -13,7 +13,7 @@
 </head>
 <body>
 <div class="shell">
-<header class="topbar"><div class="brand">VideoDeduplicator<small>内容处理策略后台</small></div><a class="btn" href="__APP_BASE__/">返回用户端</a></header>
+<header class="topbar"><div class="brand">VideoDeduplicator<small>内容处理策略后台</small></div><nav><a class="btn" href="__APP_BASE__/admin/strategies" aria-current="page">策略管理</a> <a class="btn" href="__APP_BASE__/admin/statistics">数据统计</a> <a class="btn" href="__APP_BASE__/">返回用户端</a></nav></header>
 <main class="layout">
 <aside class="panel side"><div class="panel-head"><h2>策略版本</h2><div class="version-actions"><button class="btn danger" id="batchDeleteBtn" type="button" disabled>批量删除</button><button class="btn" id="newBtn" type="button">新建</button></div></div><div class="batch-tools"><label><input type="checkbox" id="selectAll"> 全选可删除版本</label></div><div class="delete-help">当前启用版本不可删除；请先新建并启用其他版本。</div><div class="versions" id="versions"></div></aside>
 <section class="panel workspace">
