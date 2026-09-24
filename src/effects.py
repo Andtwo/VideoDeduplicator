@@ -248,6 +248,14 @@ class StickerOverlay:
         self.rgb = rgb
         self.alpha = alpha[..., None]
 
+    def composite(self, foreground):
+        """按绘制顺序合并预乘 alpha 图层，之后每帧只需混合一次。"""
+        keep = 1.0 - foreground.alpha
+        self.rgb *= keep
+        self.rgb += foreground.rgb
+        self.alpha *= keep
+        self.alpha += foreground.alpha
+
     def apply(self, frame, index):
         out = frame.astype(np.float32) * (1.0 - self.alpha) + self.rgb
         return np.clip(out, 0, 255).astype(np.uint8)
@@ -497,13 +505,20 @@ class EffectPipeline:
         layouts = options.sticker_layouts or [options.sticker_layout]
         if options.sticker_enabled:
             bottom_safe_y = caption_overlay.safe_top_y if caption_overlay and options.caption_force_bar else None
+            combined = None
             for layout in dict.fromkeys(layouts):
-                self.overlays.append(StickerOverlay(
+                layer = StickerOverlay(
                     rng, width, height,
                     bottom_safe_y=bottom_safe_y,
                     reserve_top_left=options.reserve_top_left,
                     layout=layout,
-                ))
+                )
+                if combined is None:
+                    combined = layer
+                else:
+                    combined.composite(layer)
+                del layer
+            self.overlays.append(combined)
         if caption_overlay is not None:
             if options.sticker_enabled and any(layout != "corners" for layout in layouts):
                 self.overlays.insert(0, caption_overlay)

@@ -109,12 +109,6 @@ def validate_strategy_config(raw):
     speed_min, speed_max = _bounded_pair(config, "speed_min", "speed_max", 0.5, 2.0, "播放速度")
     intro_min, intro_max = _bounded_pair(config, "intro_min", "intro_max", 0.0, 5.0, "片头时长")
     outro_min, outro_max = _bounded_pair(config, "outro_min", "outro_max", 0.0, 5.0, "片尾时长")
-    aspect_ratio = str(config.get("aspect_ratio", "source"))
-    if aspect_ratio not in ASPECT_RATIOS:
-        raise ValueError("输出画幅必须是原画幅、4:3、16:9 或 9:16")
-    sticker_layout = str(config.get("sticker_layout", "corners"))
-    if sticker_layout not in STICKER_LAYOUTS:
-        raise ValueError("贴纸布局配置无效")
 
     filter_styles = list(dict.fromkeys(config.get("filter_styles") or []))
     filter_strength = float(config.get("filter_strength", 1.0))
@@ -156,8 +150,6 @@ def validate_strategy_config(raw):
         "intro_max": round(intro_max, 1),
         "outro_min": round(outro_min, 1),
         "outro_max": round(outro_max, 1),
-        "aspect_ratio": aspect_ratios[0],
-        "sticker_layout": sticker_layouts[0],
         "aspect_ratios": aspect_ratios,
         "sticker_layouts": sticker_layouts,
     }

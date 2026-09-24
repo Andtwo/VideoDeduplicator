@@ -17,7 +17,10 @@ def test_disabled_parameter_is_ignored_but_enabled_parameter_is_validated(step, 
     raw = {**DEFAULT_CONFIG, "selection_mode": "fixed",
            "steps": ["fancy", "progress", "caption_bar"], key: "invalid"}
     normalized = validate_strategy_config(raw)
-    assert normalized[key] == DEFAULT_CONFIG[key]
+    if key == "sticker_layout":
+        assert normalized["sticker_layouts"] == [DEFAULT_CONFIG[key]]
+    else:
+        assert normalized[key] == DEFAULT_CONFIG[key]
     with pytest.raises(ValueError):
         validate_strategy_config({**raw, "steps": raw["steps"] + [step]})
 

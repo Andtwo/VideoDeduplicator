@@ -19,7 +19,7 @@ def test_all_seven_combinations_and_aspects():
     for n in (1,2,3):
         for combo in combinations(LAYOUTS,n):
             pipeline=EffectPipeline(ProcessingOptions(sticker_enabled=True,sticker_layouts=list(combo)),np.random.default_rng(1),320,240)
-            assert sum(isinstance(o,StickerOverlay) for o in pipeline.overlays)==n
+            assert sum(isinstance(o,StickerOverlay) for o in pipeline.overlays)==1
             frame=np.zeros((240,320,3),dtype=np.uint8)
             assert pipeline.apply(frame,0).shape==frame.shape
 

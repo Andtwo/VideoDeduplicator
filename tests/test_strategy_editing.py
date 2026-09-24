@@ -26,13 +26,13 @@ def test_stale_revision_cannot_overwrite_saved_configuration(tmp_path):
         with pytest.raises(StrategyConflictError):
             store.update_version(original['id'], original['name'], 'B',
                                  DEFAULT_CONFIG, revision)
-        assert store.active_version()['config']['aspect_ratio'] == '9:16'
+        assert store.active_version()['config']['aspect_ratios'] == ['9:16']
     # 重新加载后提交新修订号可以保存，外部版本号保持不变。
     updated = store.update_version(first['id'], first['name'], 'C',
-                                   {**first['config'], 'sticker_layout': 'vertical_bars'}, 1)
+                                   {**first['config'], 'sticker_layouts': ['vertical_bars']}, 1)
     assert updated['revision'] == 2
     assert updated['version'] == original['version']
-    assert updated['config']['aspect_ratio'] == '9:16'
+    assert updated['config']['aspect_ratios'] == ['9:16']
 
 
 def test_batch_delete_is_atomic_and_protects_active(tmp_path):
