@@ -15,7 +15,7 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadF
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from web.strategy_store import StrategyStore
+from web.strategy_store import StrategyStore, StrategyConflictError
 from web.worker import run_job
 
 BASE = Path(__file__).resolve().parent.parent
@@ -254,7 +254,11 @@ async def update_strategy(version_id: str, request: Request, x_admin_token: str 
         payload = await request.json()
         if not isinstance(payload, dict):
             raise ValueError("请求内容必须是对象")
-        return STRATEGY_STORE.update_version(version_id, payload.get("name"), payload.get("description"), payload.get("config"))
+        return STRATEGY_STORE.update_version(
+            version_id, payload.get("name"), payload.get("description"),
+            payload.get("config"), payload.get("expected_revision"))
+    except StrategyConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(404, "策略版本不存在") from exc
     except (ValueError, TypeError) as exc:
