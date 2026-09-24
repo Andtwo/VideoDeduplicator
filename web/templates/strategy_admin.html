@@ -13,7 +13,7 @@
 </head>
 <body>
 <div class="shell">
-<header class="topbar"><div class="brand">VideoDeduplicator<small>内容处理策略后台</small></div><a class="btn" href="/">返回用户端</a></header>
+<header class="topbar"><div class="brand">VideoDeduplicator<small>内容处理策略后台</small></div><a class="btn" href="__APP_BASE__/">返回用户端</a></header>
 <main class="layout">
 <aside class="panel side"><div class="panel-head"><h2>策略版本</h2><div class="version-actions"><button class="btn danger" id="batchDeleteBtn" type="button" disabled>批量删除</button><button class="btn" id="newBtn" type="button">新建</button></div></div><div class="batch-tools"><label><input type="checkbox" id="selectAll"> 全选可删除版本</label></div><div class="delete-help">当前启用版本不可删除；请先新建并启用其他版本。</div><div class="versions" id="versions"></div></aside>
 <section class="panel workspace">
@@ -53,6 +53,7 @@ const FX_LABELS={grain:'颗粒',vignette:'暗角',bloom:'柔光',leak:'漏光'};
 const ASPECT_LABELS={source:'保持原画幅','4:3':'4:3','16:9':'16:9','9:16':'9:16'};
 const STICKER_LAYOUT_LABELS={corners:'四角贴纸',horizontal_bar:'顶部横条贴纸',vertical_bars:'左右竖条贴纸'};
 const DEFAULT={selection_mode:'random',steps:Object.keys(STEP_LABELS).filter(step=>step!=='speed'),min_steps:3,max_steps:6,audio_modes:Object.keys(AUDIO_LABELS),fps_options:[30,60,120],drop_min:1,drop_max:3,zoom_min:1.1,zoom_max:1.2,speed_min:1.05,speed_max:1.2,filter_styles:Object.keys(FILTER_LABELS),filter_strength:1,fx_styles:Object.keys(FX_LABELS),intro_min:.8,intro_max:1.5,outro_min:.8,outro_max:1.2,aspect_ratio:'source',sticker_layout:'corners'};
+const APP_BASE='__APP_BASE__';
 const TOKEN_REQUIRED=__ADMIN_TOKEN_REQUIRED__;
 let versions=[],selectedId=null,token=sessionStorage.getItem('vd_admin_token')||'';
 const $=id=>document.getElementById(id),notice=$('notice');
@@ -61,7 +62,7 @@ checks('steps',STEP_LABELS);checks('audio',AUDIO_LABELS);checks('filters',FILTER
 function headers(){return token?{'X-Admin-Token':token}:{}}
 let noticeTimer;
 function message(text,type='ok'){clearTimeout(noticeTimer);notice.textContent=text;notice.className='notice '+type;if(type==='ok')noticeTimer=setTimeout(()=>{notice.className='notice'},6000)}
-async function api(path,options={}){options.headers={...headers(),...(options.headers||{})};const r=await fetch(path,options);if(r.status===401){$('tokenDialog').classList.add('open');throw new Error('请输入有效的管理令牌')}if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.detail||'请求失败')}return r.status===204?null:r.json()}
+async function api(path,options={}){options.headers={...headers(),...(options.headers||{})};const r=await fetch(APP_BASE+path,options);if(r.status===401){$('tokenDialog').classList.add('open');throw new Error('请输入有效的管理令牌')}if(!r.ok){let d={};try{d=await r.json()}catch{}throw new Error(d.detail||'请求失败')}return r.status===204?null:r.json()}
 function setChecked(id,values){const set=new Set(values.map(String));$(id).querySelectorAll('input').forEach(input=>input.checked=set.has(input.value))}
 function values(id){return [...$(id).querySelectorAll('input:checked')].map(input=>input.value)}
 function fill(config=DEFAULT){$('mode').value=config.selection_mode;setChecked('aspectRatio',config.aspect_ratios||[config.aspect_ratio||DEFAULT.aspect_ratio]);setChecked('stickerLayout',config.sticker_layouts||[config.sticker_layout||DEFAULT.sticker_layout]);$('minSteps').value=config.min_steps;$('maxSteps').value=config.max_steps;$('dropMin').value=config.drop_min;$('dropMax').value=config.drop_max;$('zoomMin').value=config.zoom_min;$('zoomMax').value=config.zoom_max;$('speedMin').value=config.speed_min;$('speedMax').value=config.speed_max;$('introMin').value=config.intro_min;$('introMax').value=config.intro_max;$('outroMin').value=config.outro_min;$('outroMax').value=config.outro_max;setChecked('steps',config.steps);setChecked('audio',config.audio_modes);setChecked('fps',config.fps_options);setChecked('filters',config.filter_styles);$('filterStrength').value=Math.round((config.filter_strength??1)*100);setChecked('effects',config.fx_styles);syncMode()}

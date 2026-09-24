@@ -184,8 +184,17 @@ app.mount(
 
 
 @app.get("/", response_class=HTMLResponse)
-def index():
-    return (Path(__file__).parent / "templates" / "index.html").read_text(encoding="utf-8")
+def index(request: Request):
+    return _render_page("index.html", request)
+
+
+def _render_page(filename, request):
+    # 代理覆盖该请求头；仅接受路径字符，避免注入 HTML 或跨域地址。
+    prefix = request.headers.get("x-forwarded-prefix", request.scope.get("root_path", "")).rstrip("/")
+    if prefix and (not re.fullmatch(r"(?:/[A-Za-z0-9_-]+)+", prefix)):
+        raise HTTPException(400, "无效的部署路径前缀")
+    html = (Path(__file__).parent / "templates" / filename).read_text(encoding="utf-8")
+    return html.replace("__APP_BASE__", prefix)
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -208,7 +217,7 @@ def _require_admin(request: Request, x_admin_token: str = Header("")):
 def strategy_admin(request: Request):
     if not ADMIN_TOKEN:
         _require_admin(request)
-    html = (Path(__file__).parent / "templates" / "strategy_admin.html").read_text(encoding="utf-8")
+    html = _render_page("strategy_admin.html", request)
     return html.replace("__ADMIN_TOKEN_REQUIRED__", "true" if ADMIN_TOKEN else "false")
 
 

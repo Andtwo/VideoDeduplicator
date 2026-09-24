@@ -58,6 +58,24 @@ uvicorn web.app:app --host 0.0.0.0 --port 9000 --workers 1
 
 必须使用一个 Uvicorn worker。任务队列在单进程中执行，任务元数据写入 `uploads/<task_id>/task.json`，服务重启后会恢复排队任务，并将运行中断的任务标记为失败。
 
+## Nginx 子路径代理
+
+参考 `deploy/nginx-video-deduplicator.conf`，将 location 配置加入现有 server 块，不占用根路径。
+当前本地入口为 `http://localhost:18080/video-deduplicator/`，后台为
+`http://localhost:18080/video-deduplicator/admin/strategies`，上游为 dev02 的 `192.168.121.100:9000`。
+其他环境应调整 `proxy_pass` 上游地址；同机容器访问宿主机可使用 `host.docker.internal`。
+
+Nginx 的 `proxy_pass` 尾部斜杠负责剥离子路径；`X-Forwarded-Prefix` 必须由 Nginx 覆盖为固定值。
+应用据此生成页面内的上传、状态、下载及后台 API 路径。无该请求头时仍支持 9000 根路径直连。
+自定义前缀需同时修改两个 location、重定向和请求头；支持由字母、数字、下划线、连字符组成的路径段。
+上传大小仍受 `VD_MAX_UPLOAD_MB` 限制，代理的请求体上限也需匹配。
+后台仍需 `VD_ADMIN_TOKEN`；不要把代理视为本机免鉴权入口。
+
+本地已有容器 `media-library-local-nginx`，配置挂载自 media-library 的 `deploy/nginx/default.conf`。
+修改前备份该文件，执行 `docker exec media-library-local-nginx nginx -t` 后再 reload。
+
+小程序下载后续事项见 `docs/wechat-download-followup.md`（相对项目根目录）。
+
 ## 功能
 
 - 内容视频 A：必填
