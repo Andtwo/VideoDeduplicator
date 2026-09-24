@@ -120,7 +120,10 @@ models/PP-OCRv6_medium_rec/
 ## 数据统计
 
 后台菜单“数据统计”位于 `/admin/statistics`，沿用管理令牌鉴权并支持子路径代理。
-数据保存到 `web_data/analytics.sqlite3`，备份时请连同策略文件一起保存。
+生产环境配置 `VD_DATABASE_URL=mysql+pymysql://用户:URL编码后的密码@主机:3306/mcntools`，使用 MySQL 8（PyMySQL 驱动）。连接固定使用 `utf8mb4`、东八区会话时区；时间戳保持原有绝对时间，日期按东八区生成。应用账号仅需本程序两张表的 SELECT、INSERT、UPDATE、DELETE、CREATE、INDEX 权限。数据库需由管理员预先创建。数据库故障时记录日志，不会自动切换到 SQLite。
+未设置该环境变量时，兼容使用 `web_data/analytics.sqlite3`。策略与任务详情仍为 JSON，不受统计数据库切换影响。
+
+SQLite 切换 MySQL：停服后使用 SQLite backup API 备份原文件，加载上述环境变量，运行 `venv_web/bin/python -m web.migrate_analytics --sqlite web_data/analytics.sqlite3`，逐字段核对成功后启动服务。目标表必须为空或与源数据完全一致；存在不同数据时事务回滚，不覆盖目标。原 SQLite 保留用于核对，切换后的新增数据只写入 MySQL。备份应包含 MySQL 的两张统计表及策略文件。回退到 SQLite 前必须处理切换后产生的 MySQL 新数据，不能直接把旧文件当作最新数据。
 表名为 `video_dedup_visits`（访问与心跳）、`video_dedup_task_stats`（任务与下载统计）。
 升级时首次初始化统计组件会在同一事务内将旧表 `visits`、`jobs` 重命名并更新索引，保留历史记录及下载计数；重复初始化不会再次迁移。若新旧同类表同时存在，会中止初始化并记录错误，需人工核对，避免覆盖数据。部署前应备份 SQLite 数据库；迁移后旧版本代码不能直接读取新表，回退代码时应同时恢复匹配的数据库备份。
 统计记录独立于视频 TTL 清理，长期保留，可按东八区日期筛选（最多一年）。

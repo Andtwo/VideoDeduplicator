@@ -30,6 +30,8 @@ OUTPUTS.mkdir(exist_ok=True)
 WEB_DATA.mkdir(exist_ok=True)
 STRATEGY_STORE = StrategyStore(WEB_DATA / "strategies.json")
 from web.analytics import Analytics
+from web.mysql_analytics import MySQLAnalytics
+from pymysql import MySQLError
 ANALYTICS = None
 _analytics_lock = threading.RLock()
 
@@ -40,9 +42,10 @@ def _analytics_call(method, *args):
         return None  # 忙时丢弃心跳/计数，任务状态由周期补录恢复。
     try:
         if ANALYTICS is None:
-            ANALYTICS = Analytics(WEB_DATA / "analytics.sqlite3")
+            database_url = os.getenv('VD_DATABASE_URL')
+            ANALYTICS = MySQLAnalytics(database_url) if database_url else Analytics(WEB_DATA / "analytics.sqlite3")
         return getattr(ANALYTICS, method)(*args)
-    except (sqlite3.Error, OSError):
+    except (sqlite3.Error, MySQLError, OSError):
         logging.getLogger(__name__).warning('统计操作失败: %s；业务继续执行', method, exc_info=True)
         return None
     finally:
