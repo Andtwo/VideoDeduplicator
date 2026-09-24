@@ -194,53 +194,47 @@ class StickerOverlay:
                  layout="corners"):
         if layout not in ("corners", "horizontal_bar", "vertical_bars"):
             raise ValueError("贴纸布局无效")
+        if layout != "corners":
+            # 连续色带铺满整条边缘，斜纹装饰不留间隔；任务内预渲染一次。
+            layer = Image.new("RGBA", (width, height))
+            thickness = max(2, int(min(width, height) * 0.035))
+            palette = [(45, 170, 190, 220), (230, 150, 65, 220), (160, 95, 190, 220)]
+            color = palette[int(rng.integers(0, len(palette)))]
+            boxes = [(0, 0, width, thickness)] if layout == "horizontal_bar" else [
+                (0, 0, thickness, height), (width-thickness, 0, width, height)]
+            for x0, y0, x1, y1 in boxes:
+                strip = Image.new("RGBA", (x1-x0, y1-y0), color)
+                pen = ImageDraw.Draw(strip)
+                for offset in range(-height, width+height, thickness*3):
+                    pen.line((offset, 0, offset+height, height), fill=(255,255,255,130), width=max(1,thickness//4))
+                layer.paste(strip, (x0, y0))
+            arr = np.asarray(layer, dtype=np.float32)
+            self.alpha = arr[..., 3:4] / 255.0
+            self.rgb = arr[..., :3][..., ::-1] * self.alpha
+            return
         rgb = np.zeros((height, width, 3), dtype=np.float32)
         alpha = np.zeros((height, width), dtype=np.float32)
-        if layout == "horizontal_bar":
-            positions = [(int(width * i / 6), int(height * 0.02)) for i in range(6)]
-            sizes = [max(24, int(height * 0.11))] * len(positions)
-        elif layout == "vertical_bars":
-            positions = [(int(width * 0.015), int(height * i / 5)) for i in range(1, 5)]
-            positions += [(int(width * 0.985), int(height * i / 5)) for i in range(1, 5)]
-            sizes = [max(24, int(width * 0.10))] * len(positions)
-        else:
-            corners = [(1, 0), (0, 1), (1, 1)] if reserve_top_left else [(0, 0), (1, 0), (0, 1), (1, 1)]
-            positions = corners
-            sizes = None
-        for position_index, position in enumerate(positions):
-            if layout == "corners":
-                corner_x, corner_y = position
-            else:
-                corner_x = corner_y = None
-            if sizes is not None:
-                size = sizes[position_index]
-            else:
-                size = int(width * rng.uniform(0.055, 0.11))
+        corners = [(1, 0), (0, 1), (1, 1)] if reserve_top_left else [(0, 0), (1, 0), (0, 1), (1, 1)]
+        for corner_x, corner_y in corners:
+            size = int(width * rng.uniform(0.055, 0.11))
             sticker = get_sticker(rng.choice(STICKER_KINDS), size)
             sticker = sticker.rotate(rng.uniform(-18, 18), expand=True, resample=Image_BICUBIC)
             sw, sh = sticker.size
             # 条带布局使用固定槽位；四角布局使用原有随机位置
-            if layout == "horizontal_bar":
-                x0, y0 = position
-            elif layout == "vertical_bars":
-                x0, y0 = position
-                x0 = max(0, min(width - sw, x0 - (sw if x0 > width // 2 else 0)))
-                y0 = max(0, min(height - sh, y0 - sh // 2))
+            max_dx, max_dy = width // 6, height // 6
+            if corner_x == 0:
+                x0 = int(rng.integers(int(width * 0.015), max(1, max_dx)))
             else:
-                max_dx, max_dy = width // 6, height // 6
-                if corner_x == 0:
-                    x0 = int(rng.integers(int(width * 0.015), max(1, max_dx)))
-                else:
-                    x0 = int(rng.integers(width - max_dx - sw, max(width - sw - int(width * 0.015), 1)))
-                if corner_y == 0:
-                    y0 = int(rng.integers(int(height * 0.015), max(1, max_dy)))
-                else:
-                    lower_bound = height - max_dy - sh
-                    upper_bound = height - sh - int(height * 0.015)
-                    if bottom_safe_y is not None:
-                        upper_bound = min(upper_bound, bottom_safe_y - sh - int(height * 0.015))
-                        lower_bound = min(lower_bound, upper_bound)
-                    y0 = int(rng.integers(lower_bound, max(lower_bound + 1, upper_bound + 1)))
+                x0 = int(rng.integers(width - max_dx - sw, max(width - sw - int(width * 0.015), 1)))
+            if corner_y == 0:
+                y0 = int(rng.integers(int(height * 0.015), max(1, max_dy)))
+            else:
+                lower_bound = height - max_dy - sh
+                upper_bound = height - sh - int(height * 0.015)
+                if bottom_safe_y is not None:
+                    upper_bound = min(upper_bound, bottom_safe_y - sh - int(height * 0.015))
+                    lower_bound = min(lower_bound, upper_bound)
+                y0 = int(rng.integers(lower_bound, max(lower_bound + 1, upper_bound + 1)))
             x0 = max(0, min(width - sw, x0))
             y0 = max(0, min(height - sh, y0))
             arr = np.asarray(sticker, dtype=np.float32)
@@ -255,7 +249,7 @@ class StickerOverlay:
         self.alpha = alpha[..., None]
 
     def apply(self, frame, index):
-        out = frame.astype(np.float32) * (1.0 - self.alpha) + self.rgb * self.alpha
+        out = frame.astype(np.float32) * (1.0 - self.alpha) + self.rgb
         return np.clip(out, 0, 255).astype(np.uint8)
 
 
@@ -449,7 +443,7 @@ class ProgressBarOverlay:
 
     def __init__(self, width, height, color=(226, 144, 74)):  # BGR 主题蓝
         self.width = width
-        self.bar_h = max(8, height // 105)
+        self.bar_h = max(12, height // 54)
         self.track_y = height - self.bar_h - max(3, height // 300)
         self.color = np.array(color, dtype=np.float32)
 
@@ -509,7 +503,10 @@ class EffectPipeline:
                 layout=options.sticker_layout,
             ))
         if caption_overlay is not None:
-            self.overlays.append(caption_overlay)
+            if options.sticker_enabled and options.sticker_layout != "corners":
+                self.overlays.insert(0, caption_overlay)
+            else:
+                self.overlays.append(caption_overlay)
         if options.fancy_enabled and options.fancy_text.strip():
             self.overlays.append(FancyText(
                 options.fancy_text.strip(), rng, width, height,

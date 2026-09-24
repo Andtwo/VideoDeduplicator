@@ -232,6 +232,35 @@ async def create_strategy(request: Request, x_admin_token: str = Header("")):
         raise HTTPException(422, str(exc)) from exc
 
 
+@app.post("/api/admin/strategies/batch-delete", status_code=204)
+async def delete_strategy_batch(request: Request, x_admin_token: str = Header("")):
+    _require_admin(request, x_admin_token)
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("请求内容必须是对象")
+        STRATEGY_STORE.delete_versions(payload.get("ids"))
+    except KeyError as exc:
+        raise HTTPException(404, "策略版本不存在") from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return Response(status_code=204)
+
+
+@app.put("/api/admin/strategies/{version_id}")
+async def update_strategy(version_id: str, request: Request, x_admin_token: str = Header("")):
+    _require_admin(request, x_admin_token)
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("请求内容必须是对象")
+        return STRATEGY_STORE.update_version(version_id, payload.get("name"), payload.get("description"), payload.get("config"))
+    except KeyError as exc:
+        raise HTTPException(404, "策略版本不存在") from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.post("/api/admin/strategies/{version_id}/activate")
 def activate_strategy(version_id: str, request: Request, x_admin_token: str = Header("")):
     _require_admin(request, x_admin_token)
