@@ -1,4 +1,47 @@
+import sqlite3
+
+import pytest
+
 from web.analytics import Analytics
+
+
+def test_legacy_migration_preserves_data(tmp_path):
+    path = tmp_path / 'stats.db'
+    with sqlite3.connect(path) as db:
+        db.executescript('''
+            CREATE TABLE visits(id TEXT PRIMARY KEY, visitor TEXT, day TEXT, seen REAL);
+            CREATE INDEX visits_day ON visits(day);
+            CREATE INDEX visits_seen ON visits(seen, visitor);
+            INSERT INTO visits VALUES('page:2024-01-01','visitor','2024-01-01',1704038400);
+            CREATE TABLE jobs(id TEXT PRIMARY KEY, title TEXT, strategy TEXT,
+                created REAL, day TEXT, status TEXT, started REAL, ended REAL,
+                downloads INTEGER DEFAULT 0, error TEXT DEFAULT '');
+            CREATE INDEX jobs_day ON jobs(day);
+            INSERT INTO jobs VALUES('one','测试','策略 v1',1704038400,'2024-01-01','done',10,30,7,'');
+        ''')
+    a = Analytics(path)
+    expected = a.report('2024-01-01', '2024-01-01')
+    assert (expected['pv'], expected['uv'], expected['done'], expected['downloads']) == (1, 1, 1, 7)
+    assert expected['avg_seconds'] == 20
+    assert expected['jobs'][0]['title'] == '测试'
+    assert Analytics(path).report('2024-01-01', '2024-01-01') == expected
+    a.download('one')
+    assert a.report('2024-01-01', '2024-01-01')['downloads'] == 8
+    with a.connect() as db:
+        tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert tables == {'video_dedup_visits', 'video_dedup_task_stats'}
+
+
+def test_conflicting_tables_roll_back_migration(tmp_path):
+    path = tmp_path / 'stats.db'
+    with sqlite3.connect(path) as db:
+        db.executescript('CREATE TABLE visits(id TEXT); CREATE TABLE jobs(id TEXT); '
+                         'CREATE TABLE video_dedup_task_stats(id TEXT);')
+    with pytest.raises(sqlite3.IntegrityError):
+        Analytics(path)
+    with sqlite3.connect(path) as db:
+        tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert tables == {'visits', 'jobs', 'video_dedup_task_stats'}
 
 
 def test_visits_tasks_and_downloads(tmp_path):
@@ -24,8 +67,8 @@ def test_percentile_limits_and_index(tmp_path):
     assert r['total']==120 and len(r['jobs'])==100
     assert r['p95_seconds']==114
     with a.connect() as db:
-        plan=db.execute('EXPLAIN QUERY PLAN SELECT count(DISTINCT visitor) FROM visits WHERE seen>0').fetchall()
-        assert any('visits_seen' in str(row) for row in plan)
+        plan=db.execute('EXPLAIN QUERY PLAN SELECT count(DISTINCT visitor) FROM video_dedup_visits WHERE seen>0').fetchall()
+        assert any('video_dedup_visits_seen' in str(row) for row in plan)
     # 延迟补录的旧状态不能覆盖已完成状态。
     a.task({'task_id':'0','created_at':1704038400,'status':'queued'})
     assert a.report('2000-01-01','2100-01-01')['done']==120
